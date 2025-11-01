@@ -13,25 +13,25 @@ import (
 )
 
 var (
-	ErrNotConnected   = errors.New("not connected to device")
-	ErrNoDevice       = errors.New("no device found")
-	ErrTimeout        = errors.New("operation timeout")
-	ErrNoService      = errors.New("service not found")
+	ErrNotConnected     = errors.New("not connected to device")
+	ErrNoDevice         = errors.New("no device found")
+	ErrTimeout          = errors.New("operation timeout")
+	ErrNoService        = errors.New("service not found")
 	ErrNoCharacteristic = errors.New("characteristic not found")
 )
 
 // Connection represents a BLE connection to a battery
 type Connection struct {
-	adapter     *bluetooth.Adapter
-	device      bluetooth.Device
-	service     bluetooth.DeviceService
-	writeChar   bluetooth.DeviceCharacteristic
-	notifyChar  bluetooth.DeviceCharacteristic
-	connected   bool
-	mu          sync.RWMutex
-	notifyMu    sync.Mutex
-	responses   chan []byte
-	mtu         int
+	adapter    *bluetooth.Adapter
+	device     bluetooth.Device
+	service    bluetooth.DeviceService
+	writeChar  bluetooth.DeviceCharacteristic
+	notifyChar bluetooth.DeviceCharacteristic
+	connected  bool
+	mu         sync.RWMutex
+	notifyMu   sync.Mutex
+	responses  chan []byte
+	mtu        int
 }
 
 // NewConnection creates a new BLE connection handler

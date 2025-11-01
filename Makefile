@@ -9,6 +9,7 @@ examples:
 	@mkdir -p bin
 	go build -o bin/scan ./examples/scan
 	go build -o bin/basic ./examples/basic
+	go build -o bin/monitor ./examples/monitor
 	@echo "Done. Binaries in bin/"
 
 # Run tests
@@ -32,6 +33,10 @@ vet:
 scan: examples
 	./bin/scan
 
+# Run the monitor example
+monitor: examples
+	./bin/monitor
+
 # Download dependencies
 deps:
 	go mod download
@@ -51,6 +56,7 @@ help:
 	@echo "  fmt       - Format code"
 	@echo "  vet       - Run go vet"
 	@echo "  scan      - Run the scan example"
+	@echo "  monitor   - Run the monitor example"
 	@echo "  deps      - Download dependencies"
 	@echo "  check     - Run fmt and vet"
 	@echo "  help      - Show this help message"

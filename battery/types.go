@@ -45,14 +45,14 @@ type Protection struct {
 
 // Info represents battery/BMS information
 type Info struct {
-	Model          string  // Battery model
-	Manufacturer   string  // Manufacturer name
-	SerialNumber   string  // Serial number
-	HardwareVersion string // Hardware version
-	SoftwareVersion string // Software/firmware version
-	Chemistry      string  // Battery chemistry (e.g., "LiFePO4")
-	NominalVoltage float64 // Nominal voltage
-	RatedCapacity  float64 // Rated capacity in Ah
+	Model           string  // Battery model
+	Manufacturer    string  // Manufacturer name
+	SerialNumber    string  // Serial number
+	HardwareVersion string  // Hardware version
+	SoftwareVersion string  // Software/firmware version
+	Chemistry       string  // Battery chemistry (e.g., "LiFePO4")
+	NominalVoltage  float64 // Nominal voltage
+	RatedCapacity   float64 // Rated capacity in Ah
 }
 
 // Response represents a generic BMS response

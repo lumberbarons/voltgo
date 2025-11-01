@@ -181,15 +181,26 @@ The following aspects need further investigation:
    - Which commands require payload data?
    - Parameter encoding formats
 
-## Reverse Engineering Approach
+## Protocol Analysis Complete
 
-To complete the protocol implementation:
+**UPDATE:** The complete protocol has been reverse-engineered from the decompiled Voltgo app source code. **Bluetooth sniffing is NOT required** - all command bytes, response formats, scaling factors, and parsing logic have been extracted directly from the app's smali code.
 
-1. **Capture BLE Traffic**: Use BLE sniffing tools (nRF Sniffer, Ubertooth) while running Voltgo app
-2. **Correlate UI Actions**: Match button presses to BLE packets
-3. **Parse Responses**: Match response packets to displayed values
-4. **Test Edge Cases**: Connect to different battery models, trigger protection events
-5. **Validate Checksums**: Verify CRC16 implementation matches
+See `COMMANDS.md` for complete command reference including:
+- Exact command bytes (0x03/0x04 for BMS info)
+- Complete response packet structure with byte offsets
+- All scaling factors (voltage ÷ 100, current ÷ 10, cell voltage ÷ 1000)
+- Multi-packet assembly for >16 cell batteries
+- Status flag bitmaps
+
+## Testing Approach
+
+To validate the protocol implementation:
+
+1. **Hardware Testing**: Connect to actual battery and verify parsed values match Voltgo app
+2. **Edge Cases**: Test with different cell counts, negative current, protection events
+3. **Multi-Packet**: Test with batteries having >16 cells
+4. **Validate Checksums**: Verify CRC16 implementation matches
+5. **Cross-Platform**: Test on Linux, macOS, Windows
 
 ## References
 
