@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/lumberbarons/enerwatt"
+	"github.com/lumberbarons/voltgo"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	ctx := context.Background()
 
 	// Create client
-	client, err := enerwatt.NewClient()
+	client, err := voltgo.NewClient()
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
@@ -30,6 +30,8 @@ func main() {
 	fmt.Printf("Scanning for batteries (%v)...\n", *scanDuration)
 	rawResults, err := client.ScanRaw(ctx, *scanDuration)
 	if err != nil {
+		client.Close()
+		//nolint:gocritic // Cleanup done before exit
 		log.Fatalf("Failed to scan: %v", err)
 	}
 
@@ -53,7 +55,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer battery.Disconnect()
+	defer func() {
+		//nolint:errcheck // Best effort cleanup
+		battery.Disconnect()
+	}()
 
 	fmt.Println("Connected!")
 
@@ -69,7 +74,7 @@ func main() {
 	}
 }
 
-func displayBatteryStatus(ctx context.Context, battery *enerwatt.Battery) {
+func displayBatteryStatus(ctx context.Context, battery *voltgo.Battery) {
 	// Get battery status
 	status, err := battery.GetStatus(ctx)
 	if err != nil {
@@ -91,11 +96,12 @@ func displayBatteryStatus(ctx context.Context, battery *enerwatt.Battery) {
 	fmt.Printf("General:\n")
 	fmt.Printf("  Voltage:     %.2f V\n", status.Voltage)
 	fmt.Printf("  Current:     %.2f A ", status.Current)
-	if status.Current > 0 {
+	switch {
+	case status.Current > 0:
 		fmt.Printf("(Charging)\n")
-	} else if status.Current < 0 {
+	case status.Current < 0:
 		fmt.Printf("(Discharging)\n")
-	} else {
+	default:
 		fmt.Printf("(Idle)\n")
 	}
 	fmt.Printf("  Power:       %.2f W\n", status.Voltage*status.Current)

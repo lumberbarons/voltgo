@@ -1,4 +1,4 @@
-package enerwatt
+package voltgo
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 
 	"tinygo.org/x/bluetooth"
 
-	"github.com/lumberbarons/enerwatt/battery"
-	"github.com/lumberbarons/enerwatt/ble"
-	"github.com/lumberbarons/enerwatt/protocol"
+	"github.com/lumberbarons/voltgo/battery"
+	"github.com/lumberbarons/voltgo/ble"
+	"github.com/lumberbarons/voltgo/protocol"
 )
 
 const (
@@ -17,12 +17,12 @@ const (
 	DefaultScanDuration = 10 * time.Second
 )
 
-// Client is the main client for communicating with Enerwatt batteries
+// Client is the main client for communicating with Voltgo batteries
 type Client struct {
 	conn *ble.Connection
 }
 
-// NewClient creates a new Enerwatt client
+// NewClient creates a new Voltgo client
 func NewClient() (*Client, error) {
 	conn, err := ble.NewConnection()
 	if err != nil {
@@ -106,14 +106,19 @@ func (b *Battery) SendCommand(ctx context.Context, cmd byte, data []byte) (*prot
 // GetStatus retrieves the current battery status
 // Uses command 0x03 with payload [0x00, 0x00, 0x00, 0x29]
 func (b *Battery) GetStatus(ctx context.Context) (*battery.Status, error) {
-	// Command 0x03 with 4-byte payload as specified in Voltgo app
-	cmdData := []byte{0x00, 0x00, 0x00, 0x29}
+	// Try command 0x04 first (alternative command for status)
+	fmt.Printf("[DEBUG] Trying command 0x04...\n")
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
 
-	// For multi-packet responses, we need to collect all packets
-	// For now, we'll implement single packet support
-	resp, err := b.SendCommand(ctx, 0x03, cmdData)
+	resp, err := b.SendCommand(ctx, 0x04, cmdData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get status: %w", err)
+		fmt.Printf("[DEBUG] Command 0x04 failed: %v, trying 0x03...\n", err)
+		// Fall back to command 0x03
+		cmdData = []byte{0x00, 0x00, 0x00, 0x29}
+		resp, err = b.SendCommand(ctx, 0x03, cmdData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get status: %w", err)
+		}
 	}
 
 	// Parse the BMS response

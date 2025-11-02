@@ -69,7 +69,7 @@ func ParseBMSInfoResponse(packets [][]byte) (*BMSInfo, error) {
 	currentFloat := float32(rawCurrent) / 10.0
 	// Handle negative current (discharging): if > 3276.8, subtract 6553.6
 	if currentFloat > 3276.8 {
-		currentFloat = currentFloat - 6553.6
+		currentFloat -= 6553.6
 	}
 	info.Current = currentFloat
 
@@ -84,7 +84,7 @@ func ParseBMSInfoResponse(packets [][]byte) (*BMSInfo, error) {
 	info.CellVoltages = make([]float32, info.CellCount)
 
 	// Parse first batch of cell voltages (up to 16 cells in packet 0)
-	firstBatchCount := min(info.CellCount, cellsPerPacket)
+	firstBatchCount := minInt(info.CellCount, cellsPerPacket)
 	for i := 0; i < firstBatchCount; i++ {
 		offset := offsetCellVoltages + (i * 2)
 		rawCellVoltage := binary.LittleEndian.Uint16(packet0[offset : offset+2])
@@ -99,7 +99,7 @@ func ParseBMSInfoResponse(packets [][]byte) (*BMSInfo, error) {
 			break // No more cells to parse
 		}
 
-		cellsInThisPacket := min(info.CellCount-startCell, cellsPerPacket)
+		cellsInThisPacket := minInt(info.CellCount-startCell, cellsPerPacket)
 		for i := 0; i < cellsInThisPacket; i++ {
 			offset := i * 2
 			if offset+2 > len(packetData) {
@@ -143,8 +143,8 @@ func ParseBMSInfoResponse(packets [][]byte) (*BMSInfo, error) {
 	return info, nil
 }
 
-// min returns the smaller of two integers
-func min(a, b int) int {
+// minInt returns the smaller of two integers
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

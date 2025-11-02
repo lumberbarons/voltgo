@@ -1,6 +1,8 @@
-# Contributing to Enerwatt
+# Contributing to Voltgo
 
-Thank you for your interest in contributing to the Enerwatt Go library! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to the Voltgo Go library! This document provides guidelines and information for contributors.
+
+Note: These batteries are sold under various brand names including **Voltgo**, **Enerwatt**, **TCED Worldwide**, and others, but all use the same BLE protocol compatible with the Voltgo mobile app.
 
 ## Project Status
 
@@ -25,8 +27,8 @@ This is currently a framework implementation with the core protocol structure in
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/yourusername/enerwatt.git
-   cd enerwatt
+   git clone https://github.com/yourusername/voltgo.git
+   cd voltgo
    ```
 3. Create a feature branch:
    ```bash
@@ -83,7 +85,7 @@ make vet
 ## Project Structure
 
 ```
-enerwatt/
+voltgo/
 ├── battery/          # Battery data structures
 ├── ble/             # BLE connection handling
 ├── protocol/        # Protocol packet handling
@@ -244,4 +246,4 @@ Example:
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
 
-Thank you for contributing to Enerwatt!
+Thank you for contributing to Voltgo!

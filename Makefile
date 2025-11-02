@@ -1,4 +1,4 @@
-.PHONY: build test clean examples fmt vet scan
+.PHONY: build test clean examples fmt vet scan cli cli-arm64 debug-ble
 
 # Build all examples
 build: examples
@@ -37,6 +37,27 @@ scan: examples
 monitor: examples
 	./bin/monitor
 
+# Build CLI tool
+cli:
+	@echo "Building voltgo-cli..."
+	@mkdir -p bin
+	go build -o bin/voltgo-cli ./cmd/voltgo-cli
+	@echo "Done. Binary at bin/voltgo-cli"
+
+# Build CLI tool for ARM64 Linux
+cli-arm64:
+	@echo "Building voltgo-cli for arm64 Linux..."
+	@mkdir -p bin
+	GOOS=linux GOARCH=arm64 go build -o bin/voltgo-cli-linux-arm64 ./cmd/voltgo-cli
+	@echo "Done. Binary at bin/voltgo-cli-linux-arm64"
+
+# Build debug BLE tool
+debug-ble:
+	@echo "Building debug-ble tool..."
+	@mkdir -p bin
+	go build -o bin/debug-ble ./cmd/debug-ble
+	@echo "Done. Binary at bin/debug-ble"
+
 # Download dependencies
 deps:
 	go mod download
@@ -49,14 +70,17 @@ check: fmt vet
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  build     - Build all examples"
-	@echo "  examples  - Build example binaries"
-	@echo "  test      - Run tests"
-	@echo "  clean     - Remove build artifacts"
-	@echo "  fmt       - Format code"
-	@echo "  vet       - Run go vet"
-	@echo "  scan      - Run the scan example"
-	@echo "  monitor   - Run the monitor example"
-	@echo "  deps      - Download dependencies"
-	@echo "  check     - Run fmt and vet"
-	@echo "  help      - Show this help message"
+	@echo "  build      - Build all examples"
+	@echo "  examples   - Build example binaries"
+	@echo "  cli        - Build voltgo-cli tool"
+	@echo "  cli-arm64  - Build voltgo-cli for arm64 Linux"
+	@echo "  debug-ble  - Build debug-ble diagnostic tool"
+	@echo "  test       - Run tests"
+	@echo "  clean      - Remove build artifacts"
+	@echo "  fmt        - Format code"
+	@echo "  vet        - Run go vet"
+	@echo "  scan       - Run the scan example"
+	@echo "  monitor    - Run the monitor example"
+	@echo "  deps       - Download dependencies"
+	@echo "  check      - Run fmt and vet"
+	@echo "  help       - Show this help message"

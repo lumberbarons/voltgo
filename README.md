@@ -1,22 +1,25 @@
-# Enerwatt
+# Voltgo
 
-A Go library for communicating with Enerwatt (and compatible) LiFePO4 batteries via Bluetooth Low Energy (BLE).
+A Go library for communicating with Voltgo (and compatible) LiFePO4 batteries via Bluetooth Low Energy (BLE).
+
+These batteries are sold under various brand names including **Enerwatt**, **TCED Worldwide**, and others, but all use the same BLE protocol compatible with the [Voltgo mobile app](https://voltgopower.com/products/voltgo-25-6v-100ah-lifepo-multipurpose-battery).
 
 This library provides a simple interface to connect to and monitor LiFePO4 batteries that use a BMS with Bluetooth support, compatible with the Voltgo mobile app.
 
 ## Features
 
-- BLE communication with Enerwatt LiFePO4 battery BMS
+- BLE communication with Voltgo LiFePO4 battery BMS
 - Read battery status (voltage, current, SOC, temperature)
 - Read individual cell voltages
 - Protocol implementation based on Voltgo app
 - Cross-platform support (Linux, macOS, Windows)
 - Built on TinyGo Bluetooth library
+- Compatible with Enerwatt, TCED Worldwide, and other branded batteries using the Voltgo protocol
 
 ## Installation
 
 ```bash
-go get github.com/lumberbarons/enerwatt
+go get github.com/lumberbarons/voltgo
 ```
 
 ## Requirements
@@ -31,7 +34,7 @@ go get github.com/lumberbarons/enerwatt
 ## Project Structure
 
 ```
-enerwatt/
+voltgo/
 ├── battery/           # Battery data structures and types
 │   └── types.go
 ├── ble/              # BLE connection handling
@@ -61,13 +64,13 @@ import (
     "log"
     "time"
 
-    "github.com/lumberbarons/enerwatt"
+    "github.com/lumberbarons/voltgo"
 )
 
 func main() {
     ctx := context.Background()
 
-    client, err := enerwatt.NewClient()
+    client, err := voltgo.NewClient()
     if err != nil {
         log.Fatal(err)
     }

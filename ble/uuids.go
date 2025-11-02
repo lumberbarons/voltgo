@@ -2,7 +2,7 @@ package ble
 
 import "tinygo.org/x/bluetooth"
 
-// UUIDs for Voltgo/Enerwatt BLE protocol
+// UUIDs for Voltgo BLE protocol (compatible with Enerwatt, TCED Worldwide, and other brands)
 var (
 	// ServiceUUID is the primary BLE service UUID for battery communication
 	ServiceUUID = bluetooth.NewUUID([16]byte{

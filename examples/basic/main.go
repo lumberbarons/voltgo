@@ -6,14 +6,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/lumberbarons/enerwatt"
+	"github.com/lumberbarons/voltgo"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// Create a new client
-	client, err := enerwatt.NewClient()
+	client, err := voltgo.NewClient()
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
@@ -24,6 +24,8 @@ func main() {
 	// Scan for batteries for 10 seconds
 	devices, err := client.Scan(ctx, 10*time.Second)
 	if err != nil {
+		client.Close()
+		//nolint:gocritic // Cleanup done before exit
 		log.Fatalf("Failed to scan: %v", err)
 	}
 

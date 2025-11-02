@@ -1,9 +1,10 @@
-module github.com/lumberbarons/enerwatt
+module github.com/lumberbarons/voltgo
 
 go 1.24
 
 require (
 	github.com/sigurn/crc16 v0.0.0-20211026045750-20ab5afb07e3
+	github.com/urfave/cli/v3 v3.5.0
 	tinygo.org/x/bluetooth v0.10.0
 )
 

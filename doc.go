@@ -1,12 +1,16 @@
-// Package enerwatt provides a Go library for communicating with Enerwatt
+// Package voltgo provides a Go library for communicating with Voltgo
 // and compatible LiFePO4 batteries via Bluetooth Low Energy (BLE).
+//
+// These batteries are sold under various brand names including Enerwatt,
+// TCED Worldwide, and others, but use the same BLE protocol compatible
+// with the Voltgo mobile app.
 //
 // This library implements the BLE protocol used by the Voltgo mobile app
 // to monitor and control LiFePO4 battery management systems (BMS).
 //
 // Basic usage:
 //
-//	client, err := enerwatt.NewClient()
+//	client, err := voltgo.NewClient()
 //	if err != nil {
 //		log.Fatal(err)
 //	}
@@ -50,4 +54,4 @@
 //
 // Where VER is 0x01, CMD is the command byte, DATA_LEN is a 16-bit length,
 // DATA is the payload, and CRC16 is a MODBUS checksum over all preceding bytes.
-package enerwatt
+package voltgo
