@@ -164,7 +164,7 @@ See the `examples/` directory for complete working examples:
 
 ```go
 // Create a new client
-client, err := enerwatt.NewClient()
+client, err := voltgo.NewClient()
 
 // Scan for devices
 devices, err := client.Scan(ctx, duration)
