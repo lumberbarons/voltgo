@@ -91,8 +91,13 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 		return errors.New("already connected")
 	}
 
-	// Connect to device
-	device, err := c.adapter.Connect(address, bluetooth.ConnectionParams{})
+	// Connect to device with extended timeout
+	// Use longer connection parameters for slower devices
+	connTimeout := bluetooth.NewDuration(30 * time.Second)
+	fmt.Printf("[DEBUG] Connection timeout set to: %d units (should be ~30s)\n", connTimeout)
+	device, err := c.adapter.Connect(address, bluetooth.ConnectionParams{
+		ConnectionTimeout: connTimeout,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
@@ -179,7 +184,13 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 
 	// Enable notifications
 	fmt.Printf("[DEBUG] Enabling notifications on characteristic %s...\n", c.notifyChar.UUID().String())
+	fmt.Printf("[DEBUG] Notification callback will write to channel with capacity %d\n", cap(c.responses))
+
+	notifyCount := 0
 	if err := c.notifyChar.EnableNotifications(func(buf []byte) {
+		notifyCount++
+		fmt.Printf("[DEBUG] >>> NOTIFICATION RECEIVED #%d: %d bytes <<<\n", notifyCount, len(buf))
+
 		c.notifyMu.Lock()
 		defer c.notifyMu.Unlock()
 
@@ -188,14 +199,14 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 		copy(data, buf)
 
 		// Debug logging
-		fmt.Printf("[DEBUG] Received notification: %d bytes: %x\n", len(data), data)
+		fmt.Printf("[DEBUG] Notification data: %x\n", data)
 
 		select {
 		case c.responses <- data:
-			fmt.Printf("[DEBUG] Notification sent to channel\n")
+			fmt.Printf("[DEBUG] Notification #%d sent to channel successfully\n", notifyCount)
 		default:
 			// Drop if channel is full
-			fmt.Printf("[DEBUG] Warning: Notification dropped, channel full\n")
+			fmt.Printf("[DEBUG] ERROR: Notification #%d dropped, channel full!\n", notifyCount)
 		}
 	}); err != nil {
 		//nolint:errcheck // Best effort cleanup on error
@@ -205,8 +216,9 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 	fmt.Printf("[DEBUG] Notifications enabled successfully\n")
 
 	// Give the device time to fully enable notifications
-	fmt.Printf("[DEBUG] Waiting 500ms for device to be ready...\n")
-	time.Sleep(500 * time.Millisecond)
+	// Some devices need extra time to set up notification handlers
+	fmt.Printf("[DEBUG] Waiting 2 seconds for device to be ready...\n")
+	time.Sleep(2 * time.Second)
 
 	c.connected = true
 	return nil
@@ -240,6 +252,7 @@ func (c *Connection) IsConnected() bool {
 }
 
 // WritePacket writes a packet to the device
+// For BLE, we write raw command bytes without packet framing
 func (c *Connection) WritePacket(_ context.Context, packet *protocol.Packet) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -248,7 +261,13 @@ func (c *Connection) WritePacket(_ context.Context, packet *protocol.Packet) err
 		return ErrNotConnected
 	}
 
-	data := packet.Marshal()
+	// Build simple command: [VERSION][COMMAND][DATA...]
+	// No length field or CRC for BLE ATT writes
+	data := make([]byte, 2+len(packet.Data))
+	data[0] = packet.Version
+	data[1] = packet.Command
+	copy(data[2:], packet.Data)
+
 	fmt.Printf("[DEBUG] Writing packet: cmd=0x%02x, len=%d, data=%x\n", packet.Command, len(data), data)
 
 	// Write in chunks if data is larger than MTU

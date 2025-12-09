@@ -104,21 +104,16 @@ func (b *Battery) SendCommand(ctx context.Context, cmd byte, data []byte) (*prot
 }
 
 // GetStatus retrieves the current battery status
-// Uses command 0x03 with payload [0x00, 0x00, 0x00, 0x29]
+// Uses command 0x03 with 4-byte payload [0x00, 0x00, 0x00, 0x00]
 func (b *Battery) GetStatus(ctx context.Context) (*battery.Status, error) {
-	// Try command 0x04 first (alternative command for status)
-	fmt.Printf("[DEBUG] Trying command 0x04...\n")
+	// Use command 0x03 as seen in Android app traces
+	// Android sends exactly 6 bytes: 01 03 00 00 00 00
+	fmt.Printf("[DEBUG] Sending command 0x03...\n")
 	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
 
-	resp, err := b.SendCommand(ctx, 0x04, cmdData)
+	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
-		fmt.Printf("[DEBUG] Command 0x04 failed: %v, trying 0x03...\n", err)
-		// Fall back to command 0x03
-		cmdData = []byte{0x00, 0x00, 0x00, 0x29}
-		resp, err = b.SendCommand(ctx, 0x03, cmdData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get status: %w", err)
-		}
+		return nil, fmt.Errorf("failed to get status: %w", err)
 	}
 
 	// Parse the BMS response
@@ -170,7 +165,7 @@ func averageTemp(temps []int8) float64 {
 // This uses the same command as GetStatus (0x03) since cell voltages
 // are included in the BMS info response
 func (b *Battery) GetCellVoltages(ctx context.Context) ([]battery.Cell, error) {
-	cmdData := []byte{0x00, 0x00, 0x00, 0x29}
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
 
 	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
@@ -200,7 +195,7 @@ func (b *Battery) GetCellVoltages(ctx context.Context) ([]battery.Cell, error) {
 // The protocol doesn't have a separate "info" command
 func (b *Battery) GetInfo(ctx context.Context) (*battery.Info, error) {
 	// Get BMS status which contains cell count and other info
-	cmdData := []byte{0x00, 0x00, 0x00, 0x29}
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
 	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get info: %w", err)
@@ -228,7 +223,7 @@ func (b *Battery) GetInfo(ctx context.Context) (*battery.Info, error) {
 // GetBMSInfo retrieves raw BMS information
 // This is a low-level method that returns the parsed BMS data directly
 func (b *Battery) GetBMSInfo(ctx context.Context) (*protocol.BMSInfo, error) {
-	cmdData := []byte{0x00, 0x00, 0x00, 0x29}
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
 	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get BMS info: %w", err)

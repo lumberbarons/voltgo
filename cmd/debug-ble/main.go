@@ -47,6 +47,10 @@ func main() {
 		log.Fatalf("  ✗ Device not found")
 	}
 
+	// Wait a bit after scan before connecting (macOS CoreBluetooth quirk)
+	fmt.Println("\nWaiting 2 seconds before connecting...")
+	time.Sleep(2 * time.Second)
+
 	fmt.Println("\nStep 2: Connecting...")
 	battery, err := client.ConnectByIndex(ctx, results, deviceIndex)
 	if err != nil {
@@ -55,28 +59,27 @@ func main() {
 	defer battery.Disconnect()
 	fmt.Println("  ✓ Connected")
 
-	fmt.Println("\nStep 3: Waiting 2 seconds for spontaneous notifications...")
-	time.Sleep(2 * time.Second)
-	fmt.Println("  (No spontaneous notifications received)")
-
-	fmt.Println("\nStep 4: Trying command 0x04...")
-	ctx4, cancel4 := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel4()
-	_, err = battery.SendCommand(ctx4, 0x04, []byte{0x00, 0x00, 0x00, 0x00})
+	fmt.Println("\nStep 3: Sending initialization command 0x10 0x0D (required before status requests)...")
+	ctxInit, cancelInit := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelInit()
+	// Android sends: 01 10 0d 00 00 00 (6 bytes total)
+	initResp, err := battery.SendCommand(ctxInit, 0x10, []byte{0x0D, 0x00, 0x00, 0x00})
 	if err != nil {
-		fmt.Printf("  ✗ Command 0x04 failed: %v\n", err)
+		fmt.Printf("  ⚠ Init command 0x10 0x0D failed (but may not be critical): %v\n", err)
 	} else {
-		fmt.Println("  ✓ Command 0x04 succeeded!")
+		fmt.Printf("  ✓ Init command succeeded! Received %d bytes: %x\n", len(initResp.Data), initResp.Data)
 	}
 
-	fmt.Println("\nStep 5: Trying command 0x03...")
+	fmt.Println("\nStep 4: Trying command 0x03 (status request)...")
 	ctx3, cancel3 := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel3()
-	_, err = battery.SendCommand(ctx3, 0x03, []byte{0x00, 0x00, 0x00, 0x29})
+	// Android sends: 01 03 00 00 00 00 (6 bytes total)
+	resp, err := battery.SendCommand(ctx3, 0x03, []byte{0x00, 0x00, 0x00, 0x00})
 	if err != nil {
 		fmt.Printf("  ✗ Command 0x03 failed: %v\n", err)
 	} else {
-		fmt.Println("  ✓ Command 0x03 succeeded!")
+		fmt.Printf("  ✓ Command 0x03 succeeded! Received %d bytes\n", len(resp.Data))
+		fmt.Printf("  Response data: %x\n", resp.Data)
 	}
 
 	fmt.Println("\nStep 6: Trying to read battery status via GetStatus()...")
