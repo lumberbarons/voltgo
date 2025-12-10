@@ -281,13 +281,3 @@ func (b *Battery) GetProtectionStatus(ctx context.Context) (*protocol.Protection
 	status := protocol.ParseProtectionFlags(bmsInfo.ProtectionFlags)
 	return &status, nil
 }
-
-// WritePacket writes a raw packet to the battery
-func (b *Battery) WritePacket(ctx context.Context, packet *protocol.Packet) error {
-	return b.conn.WritePacket(ctx, packet)
-}
-
-// ReadResponse reads a response packet with timeout
-func (b *Battery) ReadResponse(ctx context.Context, timeout time.Duration) (*protocol.Packet, error) {
-	return b.conn.ReadResponse(ctx, timeout)
-}

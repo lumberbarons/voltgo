@@ -1,5 +1,7 @@
 # Voltgo
 
+> **Note:** This library is not currently working. Help is very welcome!
+
 A Go library for communicating with Voltgo (and compatible) LiFePO4 batteries via Bluetooth Low Energy (BLE).
 
 These batteries are sold under various brand names including **Enerwatt**, **TCED Worldwide**, and others, but all use the same BLE protocol compatible with the [Voltgo mobile app](https://voltgopower.com/products/voltgo-25-6v-100ah-lifepo-multipurpose-battery).
@@ -42,11 +44,16 @@ voltgo/
 │   └── uuids.go
 ├── protocol/         # Protocol packet handling
 │   ├── commands.go
-│   └── packet.go
+│   ├── packet.go
+│   └── parser.go
 ├── examples/         # Example applications
 │   ├── basic/
+│   ├── monitor/
 │   └── scan/
+├── cmd/              # CLI tools
+│   └── voltgo-cli/
 ├── client.go         # Main client interface
+├── doc.go
 ├── go.mod
 └── README.md
 ```
@@ -76,15 +83,15 @@ func main() {
     }
     defer client.Close()
 
-    // Scan for 10 seconds
-    devices, err := client.Scan(ctx, 10*time.Second)
+    // Scan for 10 seconds (returns raw BLE scan results)
+    results, err := client.ScanRaw(ctx, 10*time.Second)
     if err != nil {
         log.Fatal(err)
     }
 
-    for i, device := range devices {
+    for i, result := range results {
         fmt.Printf("%d. %s (%s) - RSSI: %d dBm\n",
-            i+1, device.Name, device.Address, device.RSSI)
+            i+1, result.LocalName(), result.Address.String(), result.RSSI)
     }
 }
 ```
@@ -92,8 +99,8 @@ func main() {
 ### Reading Battery Status
 
 ```go
-// Connect to a battery device
-battery, err := client.Connect(ctx, device)
+// Connect to a battery device by address
+battery, err := client.Connect(ctx, results[0].Address)
 if err != nil {
     log.Fatal(err)
 }
@@ -123,33 +130,7 @@ for _, cell := range cells {
 
 ## Protocol Details
 
-The library implements the BLE protocol used by the Voltgo app, reverse-engineered from the Android application.
-
-### BLE UUIDs
-
-- **Service UUID**: `00001006-0000-1000-8000-00805f9b34fb`
-- **Write Characteristic**: `00001008-0000-1000-8000-00805f9b34fb`
-- **Notify Characteristic**: `00001007-0000-1000-8000-00805f9b34fb`
-
-### Packet Format
-
-```
-[VER][CMD][DATA_LEN_HIGH][DATA_LEN_LOW][DATA...][CRC16_HIGH][CRC16_LOW]
-```
-
-- **VER**: Protocol version (0x01)
-- **CMD**: Command byte
-- **DATA_LEN**: 16-bit data length (big-endian)
-- **DATA**: Variable length payload
-- **CRC16**: CRC16/MODBUS checksum (big-endian)
-
-### Multi-Frame Packets
-
-For longer transmissions (CMD=0x64):
-
-```
-[0x01][0x64][LEN_H][LEN_L][FRAME_ID_H][FRAME_ID_L][DATA...][CRC16]
-```
+For protocol details, see [PROTOCOL.md](PROTOCOL.md).
 
 ## Examples
 
@@ -157,6 +138,7 @@ See the `examples/` directory for complete working examples:
 
 - `examples/scan/` - Simple device scanner
 - `examples/basic/` - Basic battery communication example
+- `examples/monitor/` - Continuous battery monitoring
 
 ## API Reference
 
@@ -200,36 +182,25 @@ battery.Disconnect()
 
 ## Development Status
 
-**Fully Implemented!** The protocol has been completely reverse-engineered from the Voltgo Android app:
+The protocol has been reverse-engineered from the Voltgo Android app, but **communication with real hardware is not yet working**. Help debugging is very welcome!
+
+### What's Done
 
 - [x] Command IDs identified (0x03 for BMS info)
 - [x] Response parsing implemented with full byte-level decoding
 - [x] Complete data field mappings (voltage, current, SOC, SOH, cells, temps)
 - [x] Protection status parsing with flag decoding
 - [x] Multi-packet support for >16 cell batteries
+- [x] Checksum validation
 
-### Implemented Features
+### What's Not Working
 
-- ✅ Read battery voltage, current, SOC, SOH
-- ✅ Read individual cell voltages (up to 500 cells)
-- ✅ Read cell temperatures (4 sensors)
-- ✅ Parse protection status flags
-- ✅ Parse status and warning flags
-- ✅ Heating system status
-- ✅ Little-endian multi-byte value handling
-- ✅ CRC16/MODBUS checksum validation
-
-### Testing Needed
-
-The implementation is complete but **requires hardware testing** to verify:
-- Actual battery communication
-- Multi-packet assembly for large battery packs
-- Protection flag bit meanings
-- Edge cases and error handling
-
-Contributions welcome! If you have a compatible battery, please test and report results.
+- [ ] Actual BLE communication with batteries - commands are sent but no responses received
+- [ ] Unknown if protocol interpretation is correct without working hardware tests
 
 ## Contributing
+
+Contributions welcome! If you have a compatible battery, please test and report results.
 
 1. Fork the repository
 2. Create a feature branch
@@ -244,4 +215,3 @@ MIT
 
 - Protocol analysis based on the Voltgo Android application
 - Built with [TinyGo Bluetooth](https://github.com/tinygo-org/bluetooth) library
-- CRC16 implementation by [sigurn/crc16](https://github.com/sigurn/crc16)

@@ -39,7 +39,7 @@
 //
 //   - battery: Data structures for battery status, cell information, and device info
 //   - ble: Low-level BLE connection handling and characteristic I/O
-//   - protocol: Packet encoding/decoding and CRC16 checksum handling
+//   - protocol: Packet encoding/decoding
 //
 // Protocol Details:
 //
@@ -48,10 +48,9 @@
 //   - Write: 00001008-0000-1000-8000-00805f9b34fb
 //   - Notify: 00001007-0000-1000-8000-00805f9b34fb
 //
-// Packets use the format:
+// BLE packets use the format:
 //
-//	[VER][CMD][DATA_LEN_HIGH][DATA_LEN_LOW][DATA...][CRC16_HIGH][CRC16_LOW]
+//	[VER][CMD][DATA...]
 //
-// Where VER is 0x01, CMD is the command byte, DATA_LEN is a 16-bit length,
-// DATA is the payload, and CRC16 is a MODBUS checksum over all preceding bytes.
+// Where VER is 0x01, CMD is the command byte, and DATA is the payload.
 package voltgo

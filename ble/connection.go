@@ -215,16 +215,6 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 	}
 	fmt.Printf("[DEBUG] Notifications enabled successfully\n")
 
-	// Send initial command IMMEDIATELY after enabling notifications
-	// The device may have an internal timeout - Android sends command within ~160ms
-	fmt.Printf("[DEBUG] Sending initial status command immediately...\n")
-	initialCmd := []byte{0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-	if _, err := c.writeChar.WriteWithoutResponse(initialCmd); err != nil {
-		fmt.Printf("[DEBUG] Warning: initial command failed: %v\n", err)
-	} else {
-		fmt.Printf("[DEBUG] Initial command sent: %x\n", initialCmd)
-	}
-
 	c.connected = true
 	return nil
 }
