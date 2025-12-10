@@ -215,6 +215,10 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 	}
 	fmt.Printf("[DEBUG] Notifications enabled successfully\n")
 
+	// Give device time to set up notification handler
+	time.Sleep(200 * time.Millisecond)
+	fmt.Printf("[DEBUG] Post-notification setup delay complete\n")
+
 	c.connected = true
 	return nil
 }

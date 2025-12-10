@@ -115,13 +115,20 @@ func (b *Battery) SendInit(ctx context.Context) error {
 	return nil
 }
 
-// ensureInitialized is a no-op - Android trace shows 0x03 is sent first
-// The 0x10 0x0D command is sent AFTER getting a response as keep-alive
-func (b *Battery) ensureInitialized(_ context.Context) error {
-	// Based on Android HCI trace analysis:
-	// 1. First command is 0x03 (status) - gets response
-	// 2. Then 0x10 0x0D is sent as keep-alive AFTER response
-	// No initialization is needed before the first 0x03 command
+// ensureInitialized sends the init command if not already sent
+// Some devices may require this before responding to status queries
+func (b *Battery) ensureInitialized(ctx context.Context) error {
+	if b.initialized {
+		return nil
+	}
+	// Send init command (0x10 0x0D) - some devices need this before responding
+	fmt.Printf("[DEBUG] Sending init command 0x10 0x0D before first query...\n")
+	if err := b.conn.SendInit(ctx); err != nil {
+		return fmt.Errorf("failed to send init: %w", err)
+	}
+	// Small delay to let device process init
+	time.Sleep(100 * time.Millisecond)
+	b.initialized = true
 	return nil
 }
 
