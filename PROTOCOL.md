@@ -22,19 +22,37 @@ Protocol documentation based on HCI trace analysis from Android Voltgo app.
 
 ## Command Format
 
-BLE commands use a simple format with NO length field and NO CRC:
+BLE commands have different formats depending on the command type:
+
+### Command 0x03 (Battery Status)
 
 ```
-[VERSION:1][COMMAND:1][DATA:4]
+[VERSION:1][COMMAND:1][DATA:6]
 ```
-
-All commands are 6 bytes total.
 
 | Byte | Description |
 |------|-------------|
 | 0 | Version (always `0x01`) |
-| 1 | Command byte |
-| 2-5 | Data (4 bytes, zero-padded) |
+| 1 | Command byte (`0x03`) |
+| 2-7 | Data (6 bytes, zero-padded) |
+
+**Total: 8 bytes**
+
+### Extended Commands (0x10)
+
+Extended commands do NOT use the version prefix:
+
+```
+[COMMAND:1][SUBCMD:1][DATA:3-4]
+```
+
+| Byte | Description |
+|------|-------------|
+| 0 | Command byte (`0x10`) |
+| 1 | Sub-command byte |
+| 2-4/5 | Data (3-4 bytes, zero-padded) |
+
+**Total: 5 bytes (queries) or 6 bytes (set commands)**
 
 ## Commands
 
@@ -43,38 +61,39 @@ All commands are 6 bytes total.
 Primary command for reading battery data.
 
 ```
-Write:    01 03 00 00 00 00
-Response: 01 03 52 00 00 00 ... (90 bytes)
+Write:    01 03 00 00 00 00 00 00  (8 bytes)
+Response: 01 03 52 00 00 00 ...    (87 bytes ATT payload)
 ```
 
 Returns voltage, current, SOC, cell voltages, temperatures, and protection status.
 
 ### Command 0x10 - Extended Commands
 
-Extended commands use a sub-command byte as the first data byte:
+Extended commands do NOT use the version prefix. Format: `[0x10][SUBCMD][DATA]`
 
-| Sub-Cmd | Bytes | Response | Purpose |
-|---------|-------|----------|---------|
-| 0x02 | `01 10 02 00 00 00` | `10 02 01` (1 byte) | Query config |
-| 0x03 | `01 10 03 00 00 00` | `10 03 02` (1 byte) | Query config |
-| 0x04 | `01 10 04 00 00 00` | `10 04 ...` (12 bytes) | Query config |
-| 0x06 | `01 10 06 01 00 00 00` | Unknown | Set config (7 bytes) |
-| 0x0A | `01 10 0a 01 00 00 00` | Unknown | Set config (7 bytes) |
-| 0x0D | `01 10 0d 00 00 00` | No response | Keep-alive/init |
+| Sub-Cmd | Write Bytes | Response | Purpose |
+|---------|-------------|----------|---------|
+| 0x02 | `10 02 00 00 00` (5 bytes) | `10 02 01` | Query config |
+| 0x03 | `10 03 00 00 00` (5 bytes) | `10 03 02` | Query config |
+| 0x04 | `10 04 00 00 00` (5 bytes) | `10 04 0c ...` (15 bytes) | Query config (12 bytes data) |
+| 0x06 | `10 06 01 00 00 00` (6 bytes) | Unknown | Set config |
+| 0x0A | `10 0a 01 00 00 00` (6 bytes) | Unknown | Set config |
+| 0x0D | `10 0d 00 00 00` (5 bytes) | No response | Keep-alive/init |
 
 Command 0x10 0x0D is sent frequently (every few seconds) and does not generate a response.
 
 ## Response Format
 
-Responses arrive via BLE notifications with format:
+Responses arrive via BLE notifications. Format varies by command type:
 
+### Command 0x03 Response
+
+Includes version prefix:
 ```
-[VERSION:1][COMMAND:1][DATA:N]
+[VERSION:1][COMMAND:1][DATA:N]  →  01 03 52 00 00 00 ...
 ```
 
-### Command 0x03 Response Structure
-
-90-byte response. All multi-byte values are **little-endian**.
+**87 bytes** ATT payload. All multi-byte values are **little-endian**.
 
 | Offset | Size | Field | Scaling |
 |--------|------|-------|---------|
@@ -102,6 +121,19 @@ Raw current value uses unsigned 16-bit with overflow for negative:
 - If `raw / 10 > 3276.8`: `current = (raw / 10) - 6553.6` (discharging)
 - Otherwise: `current = raw / 10` (charging)
 
+### Extended Command (0x10) Responses
+
+Extended command responses do NOT include the version prefix:
+```
+[COMMAND:1][SUBCMD:1][DATA:N]  →  10 02 01 ...
+```
+
+| Sub-Cmd | Response Format |
+|---------|-----------------|
+| 0x02 | `10 02` + 1 byte data |
+| 0x03 | `10 03` + 1 byte data |
+| 0x04 | `10 04` + length byte (0x0c) + 12 bytes data |
+
 ## App Behavior
 
 Based on trace analysis, the Android app:
@@ -122,6 +154,71 @@ Based on trace analysis, the Android app:
 
 Commands use ATT Write Command (0x52) which does not require acknowledgment.
 
+## Secondary BLE Service (Undocumented)
+
+The device exposes additional handles that appear to be a secondary service:
+
+| Handle | Type | Description |
+|--------|------|-------------|
+| 0x0027 | Notify | Receives periodic notifications (~25 sec interval) |
+| 0x002a | Write | Data transfer endpoint |
+
+**Observed behavior:**
+- Handle 0x0027 sends 15-byte heartbeat notifications periodically
+- Burst data transfers observed (256-byte notifications) - possibly OTA/firmware update
+- Purpose is unknown/undocumented
+
+## Communication Flow
+
+### Connection & Initialization
+
+```
+┌─────────┐                              ┌─────────────┐
+│  App    │                              │   Battery   │
+└────┬────┘                              └──────┬──────┘
+     │                                          │
+     │─────── BLE Connect ──────────────────────►
+     │                                          │
+     │◄────── Connection Established ───────────│
+     │                                          │
+     │─────── Write 0x0012: 01 00 ──────────────►  (Enable notifications)
+     │                                          │
+     │◄────── Write Response ───────────────────│
+     │                                          │
+     │─────── Cmd 0x03: 01 03 00... ────────────►  (Get status)
+     │        [Handle 0x0015]                   │
+     │                                          │
+     │◄────── Notify: 01 03 52 00... ───────────│  (Status response)
+     │        [Handle 0x0011]                   │
+     │                                          │
+     │─────── Cmd 0x10 0x0D: 10 0d 00... ───────►  (Keep-alive/init)
+     │                                          │
+     │        (no response)                     │
+     │                                          │
+```
+
+### Polling Loop
+
+```
+┌─────────┐                              ┌─────────────┐
+│  App    │                              │   Battery   │
+└────┬────┘                              └──────┬──────┘
+     │                                          │
+     ├─────── Cmd 0x03: 01 03 00... ────────────►  (Get status)
+     │                                          │
+     │◄────── Notify: 01 03 52 00... ───────────│  (Status response)
+     │                                          │
+     │        ... 2-3 sec delay ...             │
+     │                                          │
+     ├─────── Cmd 0x10 0x0D: 10 0d 00... ───────►  (Keep-alive)
+     │                                          │
+     │        (no response)                     │
+     │                                          │
+     │        ... repeat ...                    │
+     │                                          │
+```
+
 ## Notes
 
 - Tested with ZT-25.6V100Ah batteries (Voltgo/Enerwatt compatible)
+- Device names follow pattern: `ZT-25.6V100Ah-XXXX`

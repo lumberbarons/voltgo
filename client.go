@@ -85,7 +85,8 @@ func (c *Client) Close() error {
 
 // Battery represents a connected battery
 type Battery struct {
-	conn *ble.Connection
+	conn        *ble.Connection
+	initialized bool
 }
 
 // Disconnect disconnects from the battery
@@ -103,13 +104,39 @@ func (b *Battery) SendCommand(ctx context.Context, cmd byte, data []byte) (*prot
 	return b.conn.SendCommand(ctx, cmd, data, DefaultTimeout)
 }
 
+// SendInit sends the initialization command (0x10 0x0D)
+// Per the Android app behavior, this should be sent immediately after connecting
+// This command does not generate a response
+func (b *Battery) SendInit(ctx context.Context) error {
+	if err := b.conn.SendInit(ctx); err != nil {
+		return fmt.Errorf("failed to send init: %w", err)
+	}
+	b.initialized = true
+	return nil
+}
+
+// ensureInitialized is a no-op - Android trace shows 0x03 is sent first
+// The 0x10 0x0D command is sent AFTER getting a response as keep-alive
+func (b *Battery) ensureInitialized(_ context.Context) error {
+	// Based on Android HCI trace analysis:
+	// 1. First command is 0x03 (status) - gets response
+	// 2. Then 0x10 0x0D is sent as keep-alive AFTER response
+	// No initialization is needed before the first 0x03 command
+	return nil
+}
+
 // GetStatus retrieves the current battery status
-// Uses command 0x03 with 4-byte payload [0x00, 0x00, 0x00, 0x00]
+// Uses command 0x03 with 6-byte payload (total 8 bytes: 01 03 00 00 00 00 00 00)
 func (b *Battery) GetStatus(ctx context.Context) (*battery.Status, error) {
+	// Ensure init command has been sent
+	if err := b.ensureInitialized(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize: %w", err)
+	}
+
 	// Use command 0x03 as seen in Android app traces
-	// Android sends exactly 6 bytes: 01 03 00 00 00 00
+	// Android sends exactly 8 bytes: 01 03 00 00 00 00 00 00
 	fmt.Printf("[DEBUG] Sending command 0x03...\n")
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 
 	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
@@ -165,7 +192,11 @@ func averageTemp(temps []int8) float64 {
 // This uses the same command as GetStatus (0x03) since cell voltages
 // are included in the BMS info response
 func (b *Battery) GetCellVoltages(ctx context.Context) ([]battery.Cell, error) {
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
+	if err := b.ensureInitialized(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize: %w", err)
+	}
+
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 
 	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
@@ -194,8 +225,12 @@ func (b *Battery) GetCellVoltages(ctx context.Context) ([]battery.Cell, error) {
 // Note: This returns basic information derived from the BMS status
 // The protocol doesn't have a separate "info" command
 func (b *Battery) GetInfo(ctx context.Context) (*battery.Info, error) {
+	if err := b.ensureInitialized(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize: %w", err)
+	}
+
 	// Get BMS status which contains cell count and other info
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get info: %w", err)
@@ -223,7 +258,11 @@ func (b *Battery) GetInfo(ctx context.Context) (*battery.Info, error) {
 // GetBMSInfo retrieves raw BMS information
 // This is a low-level method that returns the parsed BMS data directly
 func (b *Battery) GetBMSInfo(ctx context.Context) (*protocol.BMSInfo, error) {
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00}
+	if err := b.ensureInitialized(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize: %w", err)
+	}
+
+	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 	resp, err := b.SendCommand(ctx, 0x03, cmdData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get BMS info: %w", err)

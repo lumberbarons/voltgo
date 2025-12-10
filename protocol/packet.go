@@ -13,8 +13,17 @@ const (
 
 	// Command types
 	CmdMultiFrame = 0x64 // 100 - Multi-frame packets
-	CmdType03     = 0x03
+	CmdType03     = 0x03 // Battery status command
 	CmdType04     = 0x04
+	CmdExtended   = 0x10 // Extended commands (no version prefix)
+
+	// Extended sub-commands
+	ExtSubCmd02 = 0x02 // Query config
+	ExtSubCmd03 = 0x03 // Query config
+	ExtSubCmd04 = 0x04 // Query config (12 bytes data response)
+	ExtSubCmd06 = 0x06 // Set config
+	ExtSubCmd0A = 0x0A // Set config
+	ExtSubCmd0D = 0x0D // Keep-alive/init (no response)
 
 	MinPacketSize = 4 // VER + CMD + CRC16
 )
@@ -58,6 +67,7 @@ func (p *Packet) Marshal() []byte {
 }
 
 // Unmarshal decodes bytes into a packet and verifies CRC16
+// This is for non-BLE protocols that include length and CRC fields
 func Unmarshal(data []byte) (*Packet, error) {
 	if len(data) < MinPacketSize {
 		return nil, fmt.Errorf("packet too short: %d bytes", len(data))
@@ -88,6 +98,70 @@ func Unmarshal(data []byte) (*Packet, error) {
 	}
 
 	return packet, nil
+}
+
+// UnmarshalBLE decodes BLE notification data into a packet
+// BLE responses use format: [VERSION:1][COMMAND:1][DATA:N] with no length field or CRC
+func UnmarshalBLE(data []byte) (*Packet, error) {
+	if len(data) < 2 {
+		return nil, fmt.Errorf("BLE packet too short: %d bytes", len(data))
+	}
+
+	packet := &Packet{
+		Version: data[0],
+		Command: data[1],
+	}
+
+	// Everything after version and command is data
+	if len(data) > 2 {
+		packet.Data = make([]byte, len(data)-2)
+		copy(packet.Data, data[2:])
+	}
+
+	return packet, nil
+}
+
+// ExtendedCommand represents an extended command (0x10) without version prefix
+// Format: [0x10][SUBCMD][DATA:3-4]
+type ExtendedCommand struct {
+	SubCommand byte
+	Data       []byte
+}
+
+// NewExtendedCommand creates a new extended command
+func NewExtendedCommand(subCmd byte, data []byte) *ExtendedCommand {
+	return &ExtendedCommand{
+		SubCommand: subCmd,
+		Data:       data,
+	}
+}
+
+// MarshalBLE encodes the extended command for BLE transmission
+// Extended commands do NOT use the version prefix
+func (e *ExtendedCommand) MarshalBLE() []byte {
+	buf := make([]byte, 2+len(e.Data))
+	buf[0] = CmdExtended // 0x10
+	buf[1] = e.SubCommand
+	copy(buf[2:], e.Data)
+	return buf
+}
+
+// NewExtendedQueryCommand creates a query extended command (5 bytes)
+// Format: 10 XX 00 00 00
+func NewExtendedQueryCommand(subCmd byte) *ExtendedCommand {
+	return &ExtendedCommand{
+		SubCommand: subCmd,
+		Data:       []byte{0x00, 0x00, 0x00},
+	}
+}
+
+// NewExtendedSetCommand creates a set extended command (6 bytes)
+// Format: 10 XX VV 00 00 00
+func NewExtendedSetCommand(subCmd, value byte) *ExtendedCommand {
+	return &ExtendedCommand{
+		SubCommand: subCmd,
+		Data:       []byte{value, 0x00, 0x00, 0x00},
+	}
 }
 
 // MultiFramePacket represents a multi-frame packet (CMD=0x64)

@@ -215,10 +215,15 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 	}
 	fmt.Printf("[DEBUG] Notifications enabled successfully\n")
 
-	// Give the device time to fully enable notifications
-	// Some devices need extra time to set up notification handlers
-	fmt.Printf("[DEBUG] Waiting 2 seconds for device to be ready...\n")
-	time.Sleep(2 * time.Second)
+	// Send initial command IMMEDIATELY after enabling notifications
+	// The device may have an internal timeout - Android sends command within ~160ms
+	fmt.Printf("[DEBUG] Sending initial status command immediately...\n")
+	initialCmd := []byte{0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	if _, err := c.writeChar.WriteWithoutResponse(initialCmd); err != nil {
+		fmt.Printf("[DEBUG] Warning: initial command failed: %v\n", err)
+	} else {
+		fmt.Printf("[DEBUG] Initial command sent: %x\n", initialCmd)
+	}
 
 	c.connected = true
 	return nil
@@ -310,12 +315,13 @@ func (c *Connection) ReadResponse(ctx context.Context, timeout time.Duration) (*
 	select {
 	case data := <-c.responses:
 		fmt.Printf("[DEBUG] Received response from channel: %d bytes: %x\n", len(data), data)
-		packet, err := protocol.Unmarshal(data)
+		// Use BLE-specific unmarshaling (no CRC or length field)
+		packet, err := protocol.UnmarshalBLE(data)
 		if err != nil {
-			fmt.Printf("[DEBUG] Error unmarshaling packet: %v\n", err)
+			fmt.Printf("[DEBUG] Error unmarshaling BLE packet: %v\n", err)
 			return nil, err
 		}
-		fmt.Printf("[DEBUG] Unmarshaled packet: cmd=0x%02x, data_len=%d\n", packet.Command, len(packet.Data))
+		fmt.Printf("[DEBUG] Unmarshaled BLE packet: ver=0x%02x, cmd=0x%02x, data_len=%d\n", packet.Version, packet.Command, len(packet.Data))
 		return packet, nil
 	case <-timer.C:
 		fmt.Printf("[DEBUG] Response timeout after %v\n", timeout)
@@ -334,9 +340,41 @@ func (c *Connection) SendCommand(ctx context.Context, cmd byte, data []byte, tim
 		return nil, err
 	}
 
-	// Give the BMS a moment to process the command before waiting for response
-	fmt.Printf("[DEBUG] Waiting 100ms for BMS to process command...\n")
-	time.Sleep(100 * time.Millisecond)
-
+	// No delay - immediately wait for response
+	// Device typically responds in ~200ms per Android trace
 	return c.ReadResponse(ctx, timeout)
+}
+
+// WriteRaw writes raw bytes to the device (for extended commands without version prefix)
+func (c *Connection) WriteRaw(_ context.Context, data []byte) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.connected {
+		return ErrNotConnected
+	}
+
+	fmt.Printf("[DEBUG] Writing raw data: len=%d, data=%x\n", len(data), data)
+
+	if _, err := c.writeChar.WriteWithoutResponse(data); err != nil {
+		return fmt.Errorf("failed to write raw: %w", err)
+	}
+	fmt.Printf("[DEBUG] Raw write completed\n")
+
+	return nil
+}
+
+// SendExtendedCommand sends an extended command (0x10) without version prefix
+// These commands don't have the version byte prefix
+func (c *Connection) SendExtendedCommand(ctx context.Context, extCmd *protocol.ExtendedCommand) error {
+	data := extCmd.MarshalBLE()
+	return c.WriteRaw(ctx, data)
+}
+
+// SendInit sends the initialization command (0x10 0x0D)
+// This should be called after connecting, per the Android app behavior
+func (c *Connection) SendInit(ctx context.Context) error {
+	fmt.Printf("[DEBUG] Sending init command 0x10 0x0D...\n")
+	initCmd := protocol.NewExtendedQueryCommand(protocol.ExtSubCmd0D)
+	return c.SendExtendedCommand(ctx, initCmd)
 }

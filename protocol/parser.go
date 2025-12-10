@@ -22,22 +22,24 @@ type BMSInfo struct {
 }
 
 const (
-	// Packet 0 offsets
-	offsetVoltage       = 0x00
-	offsetCurrent       = 0x02
-	offsetCellVoltages  = 0x04
-	offsetSOC           = 0x25
-	offsetSOH           = 0x28
-	offsetStatusFlags   = 0x2E
-	offsetProtectFlags  = 0x30
-	offsetHeatingStatus = 0x32
-	offsetWarningFlags  = 0x36
-	offsetCellTemps     = 0x42
-	offsetCellCount     = 0x48
-	offsetHeatingSwitch = 0x50
+	// Packet 0 offsets (from PROTOCOL.md - offsets within DATA after VERSION+COMMAND)
+	// Response format: 01 03 [DATA...] where DATA starts at offset 0
+	offsetHeader        = 0x00 // 4 bytes header (52 00 00 00)
+	offsetVoltage       = 0x04 // 4 bytes, uint32, /100 = V
+	offsetCurrent       = 0x08 // 4 bytes, int32, /10 = A (signed)
+	offsetCellVoltages  = 0x0C // 2 bytes each, uint16, /1000 = V
+	offsetSOC           = 0x25 // 1 byte
+	offsetSOH           = 0x28 // 2 bytes
+	offsetStatusFlags   = 0x2E // 2 bytes
+	offsetProtectFlags  = 0x30 // 2 bytes
+	offsetHeatingStatus = 0x32 // 1 byte, 0x80 = on
+	offsetWarningFlags  = 0x36 // 2 bytes
+	offsetCellTemps     = 0x42 // 4 signed bytes
+	offsetCellCount     = 0x48 // 2 bytes
+	offsetHeatingSwitch = 0x50 // 2 bytes
 
 	// Constants
-	minPacket0Length   = 0x49 // 73 bytes minimum
+	minPacket0Length   = 0x4A // 74 bytes minimum (need through cell count)
 	fullPacket0Length  = 0x52 // 82 bytes for all fields
 	maxCellCount       = 500
 	defaultCellCount   = 16
@@ -60,12 +62,15 @@ func ParseBMSInfoResponse(packets [][]byte) (*BMSInfo, error) {
 
 	info := &BMSInfo{}
 
-	// Parse total voltage (offset 0x00, little-endian uint16, divide by 100)
-	rawVoltage := binary.LittleEndian.Uint16(packet0[offsetVoltage : offsetVoltage+2])
+	// Parse total voltage (offset 0x04, little-endian uint32, divide by 100)
+	rawVoltage := binary.LittleEndian.Uint32(packet0[offsetVoltage : offsetVoltage+4])
 	info.Voltage = float32(rawVoltage) / 100.0
 
-	// Parse current (offset 0x02, little-endian uint16, divide by 10, handle sign)
-	rawCurrent := binary.LittleEndian.Uint16(packet0[offsetCurrent : offsetCurrent+2])
+	// Parse current (offset 0x08, little-endian uint32, divide by 10, handle sign)
+	// Raw current uses unsigned 32-bit with overflow for negative:
+	// If raw / 10 > 3276.8: current = (raw / 10) - 6553.6 (discharging)
+	// Otherwise: current = raw / 10 (charging)
+	rawCurrent := binary.LittleEndian.Uint32(packet0[offsetCurrent : offsetCurrent+4])
 	currentFloat := float32(rawCurrent) / 10.0
 	// Handle negative current (discharging): if > 3276.8, subtract 6553.6
 	if currentFloat > 3276.8 {
@@ -83,7 +88,7 @@ func ParseBMSInfoResponse(packets [][]byte) (*BMSInfo, error) {
 	// Initialize cell voltages array
 	info.CellVoltages = make([]float32, info.CellCount)
 
-	// Parse first batch of cell voltages (up to 16 cells in packet 0)
+	// Parse first batch of cell voltages (up to 16 cells in packet 0, starting at 0x0C)
 	firstBatchCount := minInt(info.CellCount, cellsPerPacket)
 	for i := 0; i < firstBatchCount; i++ {
 		offset := offsetCellVoltages + (i * 2)
