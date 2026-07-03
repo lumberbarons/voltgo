@@ -16,14 +16,14 @@
 //	}
 //	defer client.Close()
 //
-//	// Scan for batteries
-//	devices, err := client.Scan(ctx, 10*time.Second)
+//	// Scan for batteries (raw results carry the address needed to connect)
+//	results, err := client.ScanRaw(ctx, 10*time.Second)
 //	if err != nil {
 //		log.Fatal(err)
 //	}
 //
 //	// Connect to a device
-//	battery, err := client.Connect(ctx, device)
+//	battery, err := client.Connect(ctx, results[0].Address)
 //	if err != nil {
 //		log.Fatal(err)
 //	}

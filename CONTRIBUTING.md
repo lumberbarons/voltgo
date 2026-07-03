@@ -6,11 +6,11 @@ Note: These batteries are sold under various brand names including **Voltgo**, *
 
 ## Project Status
 
-This is currently a framework implementation with the core protocol structure in place. The main areas needing development are:
+The protocol (Modbus RTU over BLE GATT) is implemented and verified against real ZT-25.6V100Ah batteries. The main areas needing development are:
 
-1. **Command Identification** - Determining the exact command bytes for specific BMS operations
-2. **Response Parsing** - Implementing parsers for battery data responses
-3. **Testing** - Testing with actual hardware
+1. **Register Map Completion** - Verifying the current register's sign/scaling under load and mapping the protection flag registers (see PROTOCOL.md)
+2. **Write Commands** - Charge/discharge switches and heating control are not yet implemented
+3. **Hardware Coverage** - Testing with other battery models and on macOS/Windows
 4. **Documentation** - Expanding documentation based on real-world usage
 
 ## How to Contribute
@@ -78,8 +78,20 @@ make fmt
 
 ### Lint Code
 
+CI enforces [golangci-lint](https://golangci-lint.run/) using the repo's `.golangci.yml` config. Run it locally before pushing:
+
 ```bash
-make vet
+golangci-lint run
+```
+
+`make vet` runs `go vet` only, which is a subset of what CI checks.
+
+### Pre-commit Hooks (optional)
+
+The repo includes a pre-commit config that runs golangci-lint on each commit. To enable it, install [pre-commit](https://pre-commit.com/) and run:
+
+```bash
+pre-commit install
 ```
 
 ## Project Structure
@@ -89,6 +101,7 @@ voltgo/
 ├── battery/          # Battery data structures
 ├── ble/             # BLE connection handling
 ├── protocol/        # Modbus RTU framing and register parsing
+├── cmd/             # CLI tools (voltgo-cli)
 ├── examples/        # Example applications
 ├── client.go        # Main client interface
 └── PROTOCOL.md      # Protocol documentation
@@ -200,23 +213,23 @@ If you're working on protocol analysis, see `PROTOCOL.md` for current knowledge.
 Example:
 
 ```markdown
-### Get Battery Status (CMD: 0x03)
+### Status Poll (function 0x03, read holding registers)
 
 **Request:**
 ```
-01 03 00 00 XX XX
+01 03 00 00 00 29 84 14
 ```
-(No payload data)
+(ADDR=0x01, FUNC=0x03, START=0, COUNT=41, CRC-16/MODBUS low byte first)
 
 **Response:**
 ```
-01 03 00 0E [14 bytes of data] XX XX
+01 03 52 [82 bytes of register data] [CRC:2]
 ```
 
 **Data Format:**
-- Bytes 0-1: Total voltage (big-endian, in centivolts)
-- Bytes 2-3: Current (big-endian, signed, in centiamperes)
-- Bytes 4: SOC percentage (0-100)
+- Register 0: Pack voltage (×0.01 V)
+- Register 1: Pack current (int16, ×0.1 A)
+- Register 21: SOC percentage (0-100)
 - ...
 ```
 

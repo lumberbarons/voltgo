@@ -1,4 +1,4 @@
-.PHONY: build test clean examples fmt vet scan cli cli-arm64 debug-ble
+.PHONY: build test clean examples fmt vet scan cli cli-arm64
 
 # Build all examples
 build: examples
@@ -51,13 +51,6 @@ cli-arm64:
 	GOOS=linux GOARCH=arm64 go build -o bin/voltgo-cli-linux-arm64 ./cmd/voltgo-cli
 	@echo "Done. Binary at bin/voltgo-cli-linux-arm64"
 
-# Build debug BLE tool
-debug-ble:
-	@echo "Building debug-ble tool..."
-	@mkdir -p bin
-	go build -o bin/debug-ble ./cmd/debug-ble
-	@echo "Done. Binary at bin/debug-ble"
-
 # Download dependencies
 deps:
 	go mod download
@@ -74,7 +67,6 @@ help:
 	@echo "  examples   - Build example binaries"
 	@echo "  cli        - Build voltgo-cli tool"
 	@echo "  cli-arm64  - Build voltgo-cli for arm64 Linux"
-	@echo "  debug-ble  - Build debug-ble diagnostic tool"
 	@echo "  test       - Run tests"
 	@echo "  clean      - Remove build artifacts"
 	@echo "  fmt        - Format code"
