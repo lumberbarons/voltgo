@@ -133,8 +133,10 @@ func readCommand(ctx context.Context, cmd *cli.Command) error {
 	fmt.Printf("Current:     %.2f A\n", status.Current)
 	fmt.Printf("SOC:         %d%%\n", status.SOC)
 	fmt.Printf("SOH:         %d%%\n", status.SOH)
-	fmt.Printf("Temperature: %.1f°C\n", status.Temperature)
 	fmt.Printf("Cell Count:  %d\n", status.CellCount)
+	for i, temp := range status.Temperatures {
+		fmt.Printf("Temp %d:      %d°C\n", i+1, temp)
+	}
 	fmt.Println()
 
 	// Display cell voltages
@@ -144,47 +146,21 @@ func readCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 	fmt.Println()
 
-	// Display protection status
-	protection, err := battery.GetProtectionStatus(ctx)
+	// Display device info
+	info, err := battery.GetInfo(ctx)
 	if err != nil {
-		fmt.Printf("Warning: Failed to get protection status: %v\n", err)
-	} else {
-		fmt.Println("=== Protection Status ===")
-		if protection.OverVoltage {
-			fmt.Println("⚠ Over voltage protection active!")
-		}
-		if protection.UnderVoltage {
-			fmt.Println("⚠ Under voltage protection active!")
-		}
-		if protection.OverCurrent {
-			fmt.Println("⚠ Over current protection active!")
-		}
-		if protection.OverTemperature {
-			fmt.Println("⚠ Over temperature protection active!")
-		}
-		if protection.UnderTemperature {
-			fmt.Println("⚠ Under temperature protection active!")
-		}
-		if protection.ShortCircuit {
-			fmt.Println("⚠ Short circuit protection active!")
-		}
-		if protection.DischargeOverCurrent {
-			fmt.Println("⚠ Discharge over current protection active!")
-		}
-		if protection.ChargeOverCurrent {
-			fmt.Println("⚠ Charge over current protection active!")
-		}
-
-		// If no protections are active
-		hasProtection := protection.OverVoltage || protection.UnderVoltage ||
-			protection.OverCurrent || protection.OverTemperature ||
-			protection.UnderTemperature || protection.ShortCircuit ||
-			protection.DischargeOverCurrent || protection.ChargeOverCurrent
-		if !hasProtection {
-			fmt.Println("All protections OK")
-		}
-		fmt.Println()
+		fmt.Printf("Warning: Failed to get device info: %v\n", err)
+		return nil
 	}
+
+	fmt.Println("=== Device Info ===")
+	fmt.Printf("Chemistry:       %s\n", info.Chemistry)
+	fmt.Printf("Nominal Voltage: %.1f V\n", info.NominalVoltage)
+	fmt.Printf("Capacity:        %.1f Ah\n", info.CapacityAh)
+	for _, s := range info.DeviceStrings {
+		fmt.Printf("Device String:   %s\n", s)
+	}
+	fmt.Println()
 
 	return nil
 }

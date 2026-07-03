@@ -1,179 +1,111 @@
 package protocol
 
 import (
-	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
-// BMSInfo contains all battery management system data
+// Register map for the status block (holding registers 0-40). Derived from
+// live reads of ZT-25.6V100Ah batteries; entries marked "unverified" have not
+// been observed at a non-trivial value yet.
+const (
+	RegVoltage      = 0  // pack voltage, 0.01 V
+	RegCurrent      = 1  // pack current, int16, 0.1 A (sign/scale unverified: always 0 at idle so far)
+	RegCellBase     = 2  // cell voltages, 1 mV, 16 slots (regs 2-17)
+	RegTempBase     = 18 // temperature sensors, int16 °C, 3 slots (regs 18-20)
+	RegSOC          = 21 // state of charge, % (regs 21/24 track together; 21 assumed SOC)
+	RegSOH          = 22 // state of health, % (regs 22/23 track together; 22 assumed SOH)
+	RegCellCount    = 36 // number of cells in series
+	RegFullCapacity = 37 // full capacity, 0.1 Ah
+
+	// StatusRegisterCount is the number of registers the Voltgo app requests
+	// for a status poll (read 0x29 registers from address 0).
+	StatusRegisterCount = 41
+
+	// DeviceInfoStart/Count cover the ASCII device-info block (model,
+	// hardware version, manufacture date as NUL-padded strings).
+	DeviceInfoStart = 105
+	DeviceInfoCount = 32
+
+	maxCellSlots = 16
+	tempSensors  = 3
+)
+
+// BMSInfo contains battery management system data parsed from the status
+// register block.
 type BMSInfo struct {
-	Voltage          float32   // Pack voltage in Volts
-	Current          float32   // Pack current in Amps (positive=charge, negative=discharge)
-	CellVoltages     []float32 // Individual cell voltages in Volts
-	CellCount        int       // Number of cells
-	SOC              int       // State of Charge (0-100%)
-	SOH              int       // State of Health (0-100%)
-	CellTemperatures []int8    // 4 cell temperatures in Celsius
-	StatusFlags      uint16    // Status bitmap
-	ProtectionFlags  uint16    // Protection status bitmap
-	WarningFlags     uint16    // Warning status bitmap
-	HeatingActive    bool      // Is heating currently active
-	HeatingSwitchOn  bool      // Is heating switch enabled
+	Voltage        float64   // pack voltage in volts
+	Current        float64   // pack current in amps (positive=charge, negative=discharge)
+	CellVoltages   []float64 // per-cell voltages in volts
+	CellCount      int       // number of cells in series
+	SOC            int       // state of charge, percent
+	SOH            int       // state of health, percent
+	Temperatures   []int     // temperature sensor readings in °C
+	FullCapacityAh float64   // full capacity in Ah
+	RawRegisters   []uint16  // complete register block for fields not yet mapped
 }
 
-const (
-	// Packet 0 offsets
-	offsetVoltage       = 0x00
-	offsetCurrent       = 0x02
-	offsetCellVoltages  = 0x04
-	offsetSOC           = 0x25
-	offsetSOH           = 0x28
-	offsetStatusFlags   = 0x2E
-	offsetProtectFlags  = 0x30
-	offsetHeatingStatus = 0x32
-	offsetWarningFlags  = 0x36
-	offsetCellTemps     = 0x42
-	offsetCellCount     = 0x48
-	offsetHeatingSwitch = 0x50
-
-	// Constants
-	minPacket0Length   = 0x49 // 73 bytes minimum
-	fullPacket0Length  = 0x52 // 82 bytes for all fields
-	maxCellCount       = 500
-	defaultCellCount   = 16
-	cellsPerPacket     = 16
-	heatingActiveValue = 0x80
-	heatingSwitchBit   = 0x10
-)
-
-// ParseBMSInfoResponse parses a BMS info response (command 0x03/0x04)
-// Supports multi-packet responses for batteries with >16 cells
-func ParseBMSInfoResponse(packets [][]byte) (*BMSInfo, error) {
-	if len(packets) == 0 {
-		return nil, fmt.Errorf("no packets provided")
+// ParseBMSInfo parses the status register block (registers 0-40).
+func ParseBMSInfo(regs []uint16) (*BMSInfo, error) {
+	if len(regs) < RegFullCapacity+1 {
+		return nil, fmt.Errorf("register block too short: %d registers, need %d", len(regs), RegFullCapacity+1)
 	}
 
-	packet0 := packets[0]
-	if len(packet0) < minPacket0Length {
-		return nil, fmt.Errorf("packet 0 too short: %d bytes, need at least %d", len(packet0), minPacket0Length)
+	info := &BMSInfo{
+		Voltage:        float64(regs[RegVoltage]) / 100.0,
+		Current:        float64(int16(regs[RegCurrent])) / 10.0,
+		SOC:            int(regs[RegSOC]),
+		SOH:            int(regs[RegSOH]),
+		FullCapacityAh: float64(regs[RegFullCapacity]) / 10.0,
+		RawRegisters:   append([]uint16(nil), regs...),
 	}
 
-	info := &BMSInfo{}
-
-	// Parse total voltage (offset 0x00, little-endian uint16, divide by 100)
-	rawVoltage := binary.LittleEndian.Uint16(packet0[offsetVoltage : offsetVoltage+2])
-	info.Voltage = float32(rawVoltage) / 100.0
-
-	// Parse current (offset 0x02, little-endian uint16, divide by 10, handle sign)
-	rawCurrent := binary.LittleEndian.Uint16(packet0[offsetCurrent : offsetCurrent+2])
-	currentFloat := float32(rawCurrent) / 10.0
-	// Handle negative current (discharging): if > 3276.8, subtract 6553.6
-	if currentFloat > 3276.8 {
-		currentFloat -= 6553.6
+	cellCount := int(regs[RegCellCount])
+	if cellCount < 1 || cellCount > maxCellSlots {
+		return nil, fmt.Errorf("implausible cell count: %d", cellCount)
 	}
-	info.Current = currentFloat
-
-	// Parse cell count (offset 0x48, little-endian uint16)
-	rawCellCount := binary.LittleEndian.Uint16(packet0[offsetCellCount : offsetCellCount+2])
-	if rawCellCount > maxCellCount {
-		rawCellCount = defaultCellCount
-	}
-	info.CellCount = int(rawCellCount)
-
-	// Initialize cell voltages array
-	info.CellVoltages = make([]float32, info.CellCount)
-
-	// Parse first batch of cell voltages (up to 16 cells in packet 0)
-	firstBatchCount := minInt(info.CellCount, cellsPerPacket)
-	for i := 0; i < firstBatchCount; i++ {
-		offset := offsetCellVoltages + (i * 2)
-		rawCellVoltage := binary.LittleEndian.Uint16(packet0[offset : offset+2])
-		info.CellVoltages[i] = float32(rawCellVoltage) / 1000.0
+	info.CellCount = cellCount
+	info.CellVoltages = make([]float64, cellCount)
+	for i := range cellCount {
+		info.CellVoltages[i] = float64(regs[RegCellBase+i]) / 1000.0
 	}
 
-	// Parse continuation packets for cells 16+
-	for packetIdx := 1; packetIdx < len(packets); packetIdx++ {
-		packetData := packets[packetIdx]
-		startCell := packetIdx * cellsPerPacket
-		if startCell >= info.CellCount {
-			break // No more cells to parse
-		}
-
-		cellsInThisPacket := minInt(info.CellCount-startCell, cellsPerPacket)
-		for i := 0; i < cellsInThisPacket; i++ {
-			offset := i * 2
-			if offset+2 > len(packetData) {
-				return nil, fmt.Errorf("packet %d too short for cell data", packetIdx)
-			}
-			rawCellVoltage := binary.LittleEndian.Uint16(packetData[offset : offset+2])
-			info.CellVoltages[startCell+i] = float32(rawCellVoltage) / 1000.0
-		}
-	}
-
-	// Parse SOC (offset 0x25, single byte)
-	info.SOC = int(packet0[offsetSOC])
-
-	// Parse SOH (offset 0x28, little-endian uint16)
-	info.SOH = int(binary.LittleEndian.Uint16(packet0[offsetSOH : offsetSOH+2]))
-
-	// Parse status flags (offset 0x2E, little-endian uint16)
-	info.StatusFlags = binary.LittleEndian.Uint16(packet0[offsetStatusFlags : offsetStatusFlags+2])
-
-	// Parse protection flags (offset 0x30, little-endian uint16)
-	info.ProtectionFlags = binary.LittleEndian.Uint16(packet0[offsetProtectFlags : offsetProtectFlags+2])
-
-	// Parse heating status (offset 0x32, single byte, 0x80 = active)
-	info.HeatingActive = (packet0[offsetHeatingStatus] == heatingActiveValue)
-
-	// Parse warning flags (offset 0x36, little-endian uint16)
-	info.WarningFlags = binary.LittleEndian.Uint16(packet0[offsetWarningFlags : offsetWarningFlags+2])
-
-	// Parse cell temperatures (offset 0x42, 4 signed bytes)
-	info.CellTemperatures = make([]int8, 4)
-	for i := 0; i < 4; i++ {
-		info.CellTemperatures[i] = int8(packet0[offsetCellTemps+i])
-	}
-
-	// Parse heating switch (offset 0x50, only if packet is long enough)
-	if len(packet0) >= fullPacket0Length {
-		heatingSwitch := binary.LittleEndian.Uint16(packet0[offsetHeatingSwitch : offsetHeatingSwitch+2])
-		info.HeatingSwitchOn = (heatingSwitch & heatingSwitchBit) != 0
+	info.Temperatures = make([]int, tempSensors)
+	for i := range tempSensors {
+		info.Temperatures[i] = int(int16(regs[RegTempBase+i]))
 	}
 
 	return info, nil
 }
 
-// minInt returns the smaller of two integers
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+// DeviceInfo contains the ASCII identity strings from the device-info
+// register block.
+type DeviceInfo struct {
+	Strings []string // NUL-separated ASCII fields, e.g. model, hw version, date
 }
 
-// ProtectionStatus represents decoded protection flags
-type ProtectionStatus struct {
-	OverVoltage          bool
-	UnderVoltage         bool
-	OverCurrent          bool
-	OverTemperature      bool
-	UnderTemperature     bool
-	ShortCircuit         bool
-	DischargeOverCurrent bool
-	ChargeOverCurrent    bool
+// ParseDeviceInfo extracts printable ASCII fields from the device-info
+// register block (registers 105+).
+func ParseDeviceInfo(regs []uint16) *DeviceInfo {
+	raw := make([]byte, 0, len(regs)*2)
+	for _, r := range regs {
+		raw = append(raw, byte(r>>8), byte(r&0xFF))
+	}
+
+	var fields []string
+	for _, part := range strings.FieldsFunc(string(raw), func(r rune) bool { return r == 0 }) {
+		if isPrintableASCII(part) && len(part) > 1 {
+			fields = append(fields, part)
+		}
+	}
+	return &DeviceInfo{Strings: fields}
 }
 
-// ParseProtectionFlags decodes protection status flags
-// Note: Bit mappings are estimates and may need verification with actual hardware
-func ParseProtectionFlags(flags uint16) ProtectionStatus {
-	return ProtectionStatus{
-		OverVoltage:          (flags & 0x0001) != 0,
-		UnderVoltage:         (flags & 0x0002) != 0,
-		OverCurrent:          (flags & 0x0004) != 0,
-		OverTemperature:      (flags & 0x0008) != 0,
-		UnderTemperature:     (flags & 0x0010) != 0,
-		ShortCircuit:         (flags & 0x0020) != 0,
-		DischargeOverCurrent: (flags & 0x0040) != 0,
-		ChargeOverCurrent:    (flags & 0x0080) != 0,
+func isPrintableASCII(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r > 0x7E {
+			return false
+		}
 	}
+	return true
 }

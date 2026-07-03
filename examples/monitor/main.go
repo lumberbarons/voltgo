@@ -82,13 +82,6 @@ func displayBatteryStatus(ctx context.Context, battery *voltgo.Battery) {
 		return
 	}
 
-	// Get protection status
-	protection, err := battery.GetProtectionStatus(ctx)
-	if err != nil {
-		log.Printf("Failed to get protection status: %v", err)
-		// Continue anyway
-	}
-
 	fmt.Printf("═══════════════════════════════════════════════════════════\n")
 	fmt.Printf("Battery Status - %s\n", status.UpdatedAt.Format("15:04:05"))
 	fmt.Printf("═══════════════════════════════════════════════════════════\n\n")
@@ -145,30 +138,10 @@ func displayBatteryStatus(ctx context.Context, battery *voltgo.Battery) {
 		fmt.Printf("  Delta: %.3fV\n\n", delta)
 	}
 
-	if protection != nil {
-		fmt.Printf("Protection Status:\n")
-		if protection.OverVoltage {
-			fmt.Printf("  ⚠ Over Voltage\n")
-		}
-		if protection.UnderVoltage {
-			fmt.Printf("  ⚠ Under Voltage\n")
-		}
-		if protection.OverCurrent {
-			fmt.Printf("  ⚠ Over Current\n")
-		}
-		if protection.OverTemperature {
-			fmt.Printf("  ⚠ Over Temperature\n")
-		}
-		if protection.UnderTemperature {
-			fmt.Printf("  ⚠ Under Temperature\n")
-		}
-		if protection.ShortCircuit {
-			fmt.Printf("  ⚠ Short Circuit\n")
-		}
-		if !protection.OverVoltage && !protection.UnderVoltage &&
-			!protection.OverCurrent && !protection.OverTemperature &&
-			!protection.UnderTemperature && !protection.ShortCircuit {
-			fmt.Printf("  ✓ All protections normal\n")
+	if len(status.Temperatures) > 0 {
+		fmt.Printf("Temperatures:\n")
+		for i, temp := range status.Temperatures {
+			fmt.Printf("  Sensor %d: %d°C\n", i+1, temp)
 		}
 		fmt.Println()
 	}

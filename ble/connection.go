@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"tinygo.org/x/bluetooth"
-
-	"github.com/lumberbarons/voltgo/protocol"
 )
 
 var (
@@ -18,7 +16,11 @@ var (
 	ErrTimeout          = errors.New("operation timeout")
 	ErrNoService        = errors.New("service not found")
 	ErrNoCharacteristic = errors.New("characteristic not found")
+	ErrFrameTooLarge    = errors.New("frame exceeds device buffer")
 )
+
+// maxFrameSize is the size of the device's write characteristic buffer.
+const maxFrameSize = 200
 
 // Connection represents a BLE connection to a battery
 type Connection struct {
@@ -29,9 +31,7 @@ type Connection struct {
 	notifyChar bluetooth.DeviceCharacteristic
 	connected  bool
 	mu         sync.RWMutex
-	notifyMu   sync.Mutex
 	responses  chan []byte
-	mtu        int
 }
 
 // NewConnection creates a new BLE connection handler
@@ -44,7 +44,6 @@ func NewConnection() (*Connection, error) {
 	return &Connection{
 		adapter:   adapter,
 		responses: make(chan []byte, 10),
-		mtu:       20, // Default BLE MTU
 	}, nil
 }
 
@@ -53,7 +52,6 @@ func (c *Connection) Scan(ctx context.Context, duration time.Duration) ([]blueto
 	var devices []bluetooth.ScanResult
 	var mu sync.Mutex
 
-	// Create context with timeout
 	scanCtx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
 
@@ -62,7 +60,6 @@ func (c *Connection) Scan(ctx context.Context, duration time.Duration) ([]blueto
 		devices = append(devices, result)
 		mu.Unlock()
 
-		// Check if context is done
 		select {
 		case <-scanCtx.Done():
 			//nolint:errcheck // Best effort stop scan in callback
@@ -82,7 +79,8 @@ func (c *Connection) Scan(ctx context.Context, duration time.Duration) ([]blueto
 	return devices, nil
 }
 
-// Connect connects to a BLE device by address
+// Connect connects to a BLE device by address and prepares the battery's
+// write and notify characteristics.
 func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -91,60 +89,28 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 		return errors.New("already connected")
 	}
 
-	// Connect to device
-	device, err := c.adapter.Connect(address, bluetooth.ConnectionParams{})
+	device, err := c.adapter.Connect(address, bluetooth.ConnectionParams{
+		ConnectionTimeout: bluetooth.NewDuration(30 * time.Second),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
 	c.device = device
 
-	// First discover ALL services to see what's available
-	fmt.Printf("[DEBUG] Discovering all services...\n")
-	allServices, err := device.DiscoverServices(nil)
-	if err != nil {
-		//nolint:errcheck // Best effort cleanup on error
-		device.Disconnect()
-		return fmt.Errorf("failed to discover all services: %w", err)
-	}
-
-	fmt.Printf("[DEBUG] Found %d services:\n", len(allServices))
-	for i, svc := range allServices {
-		fmt.Printf("[DEBUG]   %d: UUID=%s\n", i, svc.UUID().String())
-	}
-
-	// Discover our specific service
 	services, err := device.DiscoverServices([]bluetooth.UUID{ServiceUUID})
 	if err != nil {
 		//nolint:errcheck // Best effort cleanup on error
 		device.Disconnect()
 		return fmt.Errorf("failed to discover services: %w", err)
 	}
-
 	if len(services) == 0 {
 		//nolint:errcheck // Best effort cleanup on error
 		device.Disconnect()
 		return ErrNoService
 	}
-
 	c.service = services[0]
-	fmt.Printf("[DEBUG] Using service: %s\n", c.service.UUID().String())
 
-	// Discover ALL characteristics first to see what's available
-	fmt.Printf("[DEBUG] Discovering all characteristics...\n")
-	allChars, err := c.service.DiscoverCharacteristics(nil)
-	if err != nil {
-		//nolint:errcheck // Best effort cleanup on error
-		device.Disconnect()
-		return fmt.Errorf("failed to discover characteristics: %w", err)
-	}
-
-	fmt.Printf("[DEBUG] Found %d characteristics:\n", len(allChars))
-	for i, char := range allChars {
-		fmt.Printf("[DEBUG]   %d: UUID=%s\n", i, char.UUID().String())
-	}
-
-	// Discover specific characteristics
 	chars, err := c.service.DiscoverCharacteristics([]bluetooth.UUID{
 		WriteCharacteristicUUID,
 		NotifyCharacteristicUUID,
@@ -155,58 +121,40 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 		return fmt.Errorf("failed to discover characteristics: %w", err)
 	}
 
-	fmt.Printf("[DEBUG] Looking for Write UUID: %s\n", WriteCharacteristicUUID.String())
-	fmt.Printf("[DEBUG] Looking for Notify UUID: %s\n", NotifyCharacteristicUUID.String())
-
+	var haveWrite, haveNotify bool
 	for _, char := range chars {
-		fmt.Printf("[DEBUG] Found characteristic: %s\n", char.UUID().String())
-		if char.UUID() == WriteCharacteristicUUID {
+		switch char.UUID() {
+		case WriteCharacteristicUUID:
 			c.writeChar = char
-			fmt.Printf("[DEBUG] Assigned write characteristic\n")
-		} else if char.UUID() == NotifyCharacteristicUUID {
+			haveWrite = true
+		case NotifyCharacteristicUUID:
 			c.notifyChar = char
-			fmt.Printf("[DEBUG] Assigned notify characteristic\n")
+			haveNotify = true
 		}
 	}
-
-	if c.writeChar.UUID().String() == "" || c.notifyChar.UUID().String() == "" {
+	if !haveWrite || !haveNotify {
 		//nolint:errcheck // Best effort cleanup on error
 		device.Disconnect()
-		fmt.Printf("[DEBUG] ERROR: Missing characteristics - write=%s, notify=%s\n",
-			c.writeChar.UUID().String(), c.notifyChar.UUID().String())
 		return ErrNoCharacteristic
 	}
 
-	// Enable notifications
-	fmt.Printf("[DEBUG] Enabling notifications on characteristic %s...\n", c.notifyChar.UUID().String())
 	if err := c.notifyChar.EnableNotifications(func(buf []byte) {
-		c.notifyMu.Lock()
-		defer c.notifyMu.Unlock()
-
-		// Copy data to prevent modification
 		data := make([]byte, len(buf))
 		copy(data, buf)
 
-		// Debug logging
-		fmt.Printf("[DEBUG] Received notification: %d bytes: %x\n", len(data), data)
-
 		select {
 		case c.responses <- data:
-			fmt.Printf("[DEBUG] Notification sent to channel\n")
 		default:
 			// Drop if channel is full
-			fmt.Printf("[DEBUG] Warning: Notification dropped, channel full\n")
 		}
 	}); err != nil {
 		//nolint:errcheck // Best effort cleanup on error
 		device.Disconnect()
 		return fmt.Errorf("failed to enable notifications: %w", err)
 	}
-	fmt.Printf("[DEBUG] Notifications enabled successfully\n")
 
-	// Give the device time to fully enable notifications
-	fmt.Printf("[DEBUG] Waiting 500ms for device to be ready...\n")
-	time.Sleep(500 * time.Millisecond)
+	// Give the device a moment to settle after CCCD write
+	time.Sleep(200 * time.Millisecond)
 
 	c.connected = true
 	return nil
@@ -239,44 +187,26 @@ func (c *Connection) IsConnected() bool {
 	return c.connected
 }
 
-// WritePacket writes a packet to the device
-func (c *Connection) WritePacket(_ context.Context, packet *protocol.Packet) error {
+// WriteFrame writes a raw frame to the device's write characteristic.
+func (c *Connection) WriteFrame(_ context.Context, frame []byte) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if !c.connected {
 		return ErrNotConnected
 	}
-
-	data := packet.Marshal()
-	fmt.Printf("[DEBUG] Writing packet: cmd=0x%02x, len=%d, data=%x\n", packet.Command, len(data), data)
-
-	// Write in chunks if data is larger than MTU
-	chunkSize := c.mtu - 3 // Account for ATT overhead
-	for i := 0; i < len(data); i += chunkSize {
-		end := i + chunkSize
-		if end > len(data) {
-			end = len(data)
-		}
-
-		chunk := data[i:end]
-		fmt.Printf("[DEBUG] Writing chunk: offset=%d, len=%d, data=%x\n", i, len(chunk), chunk)
-		if _, err := c.writeChar.WriteWithoutResponse(chunk); err != nil {
-			return fmt.Errorf("failed to write chunk: %w", err)
-		}
-		fmt.Printf("[DEBUG] Write completed\n")
-
-		// Small delay between chunks
-		if end < len(data) {
-			time.Sleep(10 * time.Millisecond)
-		}
+	if len(frame) > maxFrameSize {
+		return fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, len(frame))
 	}
 
+	if _, err := c.writeChar.WriteWithoutResponse(frame); err != nil {
+		return fmt.Errorf("failed to write frame: %w", err)
+	}
 	return nil
 }
 
-// ReadResponse reads a response with timeout
-func (c *Connection) ReadResponse(ctx context.Context, timeout time.Duration) (*protocol.Packet, error) {
+// ReadFrame waits for the next notification frame, up to timeout.
+func (c *Connection) ReadFrame(ctx context.Context, timeout time.Duration) ([]byte, error) {
 	c.mu.RLock()
 	if !c.connected {
 		c.mu.RUnlock()
@@ -284,40 +214,33 @@ func (c *Connection) ReadResponse(ctx context.Context, timeout time.Duration) (*
 	}
 	c.mu.RUnlock()
 
-	fmt.Printf("[DEBUG] Waiting for response (timeout=%v)...\n", timeout)
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
 	case data := <-c.responses:
-		fmt.Printf("[DEBUG] Received response from channel: %d bytes: %x\n", len(data), data)
-		packet, err := protocol.Unmarshal(data)
-		if err != nil {
-			fmt.Printf("[DEBUG] Error unmarshaling packet: %v\n", err)
-			return nil, err
-		}
-		fmt.Printf("[DEBUG] Unmarshaled packet: cmd=0x%02x, data_len=%d\n", packet.Command, len(packet.Data))
-		return packet, nil
+		return data, nil
 	case <-timer.C:
-		fmt.Printf("[DEBUG] Response timeout after %v\n", timeout)
 		return nil, ErrTimeout
 	case <-ctx.Done():
-		fmt.Printf("[DEBUG] Context cancelled: %v\n", ctx.Err())
 		return nil, ctx.Err()
 	}
 }
 
-// SendCommand sends a command and waits for response
-func (c *Connection) SendCommand(ctx context.Context, cmd byte, data []byte, timeout time.Duration) (*protocol.Packet, error) {
-	packet := protocol.NewPacket(cmd, data)
-
-	if err := c.WritePacket(ctx, packet); err != nil {
-		return nil, err
+// Request writes a frame and waits for the response notification. Any stale
+// notifications queued before the write are discarded.
+func (c *Connection) Request(ctx context.Context, frame []byte, timeout time.Duration) ([]byte, error) {
+drain:
+	for {
+		select {
+		case <-c.responses:
+		default:
+			break drain
+		}
 	}
 
-	// Give the BMS a moment to process the command before waiting for response
-	fmt.Printf("[DEBUG] Waiting 100ms for BMS to process command...\n")
-	time.Sleep(100 * time.Millisecond)
-
-	return c.ReadResponse(ctx, timeout)
+	if err := c.WriteFrame(ctx, frame); err != nil {
+		return nil, err
+	}
+	return c.ReadFrame(ctx, timeout)
 }
