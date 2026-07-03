@@ -85,8 +85,7 @@ func (c *Client) Close() error {
 
 // Battery represents a connected battery
 type Battery struct {
-	conn        *ble.Connection
-	initialized bool
+	conn *ble.Connection
 }
 
 // Disconnect disconnects from the battery
@@ -99,192 +98,112 @@ func (b *Battery) IsConnected() bool {
 	return b.conn.IsConnected()
 }
 
-// SendCommand sends a raw command to the battery
-func (b *Battery) SendCommand(ctx context.Context, cmd byte, data []byte) (*protocol.Packet, error) {
-	return b.conn.SendCommand(ctx, cmd, data, DefaultTimeout)
+// ReadRegisters reads count holding registers starting at startReg.
+// This is the low-level primitive underlying all queries; the battery
+// silently ignores malformed requests, which surfaces here as a timeout.
+func (b *Battery) ReadRegisters(ctx context.Context, startReg, count uint16) ([]uint16, error) {
+	frame := protocol.NewReadRequest(protocol.DefaultSlaveAddr, startReg, count)
+
+	resp, err := b.conn.Request(ctx, frame, DefaultTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read registers %d-%d: %w", startReg, startReg+count-1, err)
+	}
+
+	regs, err := protocol.ParseReadResponse(resp, protocol.DefaultSlaveAddr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid response for registers %d-%d: %w", startReg, startReg+count-1, err)
+	}
+	return regs, nil
 }
 
-// SendInit sends the initialization command (0x10 0x0D)
-// Per the Android app behavior, this should be sent immediately after connecting
-// This command does not generate a response
-func (b *Battery) SendInit(ctx context.Context) error {
-	if err := b.conn.SendInit(ctx); err != nil {
-		return fmt.Errorf("failed to send init: %w", err)
+// GetBMSInfo reads and parses the status register block. This is the
+// low-level variant of GetStatus and includes the raw registers.
+func (b *Battery) GetBMSInfo(ctx context.Context) (*protocol.BMSInfo, error) {
+	regs, err := b.ReadRegisters(ctx, 0, protocol.StatusRegisterCount)
+	if err != nil {
+		return nil, err
 	}
-	b.initialized = true
-	return nil
-}
-
-// ensureInitialized sends the init command if not already sent
-// Some devices may require this before responding to status queries
-func (b *Battery) ensureInitialized(ctx context.Context) error {
-	if b.initialized {
-		return nil
-	}
-	// Send init command (0x10 0x0D) - some devices need this before responding
-	fmt.Printf("[DEBUG] Sending init command 0x10 0x0D before first query...\n")
-	if err := b.conn.SendInit(ctx); err != nil {
-		return fmt.Errorf("failed to send init: %w", err)
-	}
-	// Small delay to let device process init
-	time.Sleep(100 * time.Millisecond)
-	b.initialized = true
-	return nil
+	return protocol.ParseBMSInfo(regs)
 }
 
 // GetStatus retrieves the current battery status
-// Uses command 0x03 with 6-byte payload (total 8 bytes: 01 03 00 00 00 00 00 00)
 func (b *Battery) GetStatus(ctx context.Context) (*battery.Status, error) {
-	// Ensure init command has been sent
-	if err := b.ensureInitialized(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize: %w", err)
-	}
-
-	// Use command 0x03 as seen in Android app traces
-	// Android sends exactly 8 bytes: 01 03 00 00 00 00 00 00
-	fmt.Printf("[DEBUG] Sending command 0x03...\n")
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-
-	resp, err := b.SendCommand(ctx, 0x03, cmdData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get status: %w", err)
-	}
-
-	// Parse the BMS response
-	bmsInfo, err := protocol.ParseBMSInfoResponse([][]byte{resp.Data})
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse BMS response: %w", err)
-	}
-
-	// Convert to battery.Status format
-	status := &battery.Status{
-		Voltage:     float64(bmsInfo.Voltage),
-		Current:     float64(bmsInfo.Current),
-		SOC:         bmsInfo.SOC,
-		SOH:         bmsInfo.SOH,
-		Temperature: float64(averageTemp(bmsInfo.CellTemperatures)),
-		CellCount:   bmsInfo.CellCount,
-		Cells:       make([]battery.Cell, len(bmsInfo.CellVoltages)),
-		UpdatedAt:   time.Now(),
-	}
-
-	// Convert cell voltages to battery.Cell format
-	for i, voltage := range bmsInfo.CellVoltages {
-		status.Cells[i] = battery.Cell{
-			Index:   i,
-			Voltage: float64(voltage),
-		}
-	}
-
-	// Add capacity information if available
-	// Note: The BMS response doesn't include capacity directly
-	// This would need to be calculated or stored separately
-
-	return status, nil
-}
-
-// averageTemp calculates the average of temperature readings
-func averageTemp(temps []int8) float64 {
-	if len(temps) == 0 {
-		return 0
-	}
-	sum := 0
-	for _, t := range temps {
-		sum += int(t)
-	}
-	return float64(sum) / float64(len(temps))
-}
-
-// GetCellVoltages retrieves individual cell voltages
-// This uses the same command as GetStatus (0x03) since cell voltages
-// are included in the BMS info response
-func (b *Battery) GetCellVoltages(ctx context.Context) ([]battery.Cell, error) {
-	if err := b.ensureInitialized(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize: %w", err)
-	}
-
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-
-	resp, err := b.SendCommand(ctx, 0x03, cmdData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cell voltages: %w", err)
-	}
-
-	// Parse the BMS response
-	bmsInfo, err := protocol.ParseBMSInfoResponse([][]byte{resp.Data})
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse BMS response: %w", err)
-	}
-
-	// Convert to battery.Cell format
-	cells := make([]battery.Cell, len(bmsInfo.CellVoltages))
-	for i, voltage := range bmsInfo.CellVoltages {
-		cells[i] = battery.Cell{
-			Index:   i,
-			Voltage: float64(voltage),
-		}
-	}
-
-	return cells, nil
-}
-
-// GetInfo retrieves battery/BMS information
-// Note: This returns basic information derived from the BMS status
-// The protocol doesn't have a separate "info" command
-func (b *Battery) GetInfo(ctx context.Context) (*battery.Info, error) {
-	if err := b.ensureInitialized(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize: %w", err)
-	}
-
-	// Get BMS status which contains cell count and other info
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-	resp, err := b.SendCommand(ctx, 0x03, cmdData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get info: %w", err)
-	}
-
-	bmsInfo, err := protocol.ParseBMSInfoResponse([][]byte{resp.Data})
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse BMS response: %w", err)
-	}
-
-	// Calculate nominal voltage based on cell count (LiFePO4 = 3.2V per cell nominal)
-	nominalVoltage := float64(bmsInfo.CellCount) * 3.2
-
-	info := &battery.Info{
-		Chemistry:      "LiFePO4",
-		NominalVoltage: nominalVoltage,
-		// Note: Model, Manufacturer, SerialNumber, HardwareVersion, SoftwareVersion
-		// are not available in the BMS response. These would require separate commands
-		// or manual configuration
-	}
-
-	return info, nil
-}
-
-// GetBMSInfo retrieves raw BMS information
-// This is a low-level method that returns the parsed BMS data directly
-func (b *Battery) GetBMSInfo(ctx context.Context) (*protocol.BMSInfo, error) {
-	if err := b.ensureInitialized(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize: %w", err)
-	}
-
-	cmdData := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-	resp, err := b.SendCommand(ctx, 0x03, cmdData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get BMS info: %w", err)
-	}
-
-	return protocol.ParseBMSInfoResponse([][]byte{resp.Data})
-}
-
-// GetProtectionStatus retrieves and decodes protection status flags
-func (b *Battery) GetProtectionStatus(ctx context.Context) (*protocol.ProtectionStatus, error) {
 	bmsInfo, err := b.GetBMSInfo(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	status := protocol.ParseProtectionFlags(bmsInfo.ProtectionFlags)
-	return &status, nil
+	status := &battery.Status{
+		Voltage:      bmsInfo.Voltage,
+		Current:      bmsInfo.Current,
+		SOC:          bmsInfo.SOC,
+		SOH:          bmsInfo.SOH,
+		Temperature:  averageTemp(bmsInfo.Temperatures),
+		Temperatures: bmsInfo.Temperatures,
+		CellCount:    bmsInfo.CellCount,
+		Cells:        make([]battery.Cell, len(bmsInfo.CellVoltages)),
+		UpdatedAt:    time.Now(),
+	}
+
+	for i, voltage := range bmsInfo.CellVoltages {
+		status.Cells[i] = battery.Cell{
+			Index:   i,
+			Voltage: voltage,
+		}
+	}
+
+	return status, nil
+}
+
+// GetCellVoltages retrieves individual cell voltages
+func (b *Battery) GetCellVoltages(ctx context.Context) ([]battery.Cell, error) {
+	status, err := b.GetStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return status.Cells, nil
+}
+
+// GetInfo retrieves battery identity information: chemistry and nominal
+// voltage derived from the cell count, plus the device's ASCII identity
+// strings (model, hardware version, manufacture date).
+func (b *Battery) GetInfo(ctx context.Context) (*battery.Info, error) {
+	bmsInfo, err := b.GetBMSInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	info := &battery.Info{
+		Chemistry: "LiFePO4",
+		// LiFePO4 nominal is 3.2V per cell
+		NominalVoltage: float64(bmsInfo.CellCount) * 3.2,
+		CapacityAh:     bmsInfo.FullCapacityAh,
+	}
+
+	if devInfo, err := b.GetDeviceInfo(ctx); err == nil {
+		info.DeviceStrings = devInfo.Strings
+	}
+
+	return info, nil
+}
+
+// GetDeviceInfo reads the ASCII device-info register block.
+func (b *Battery) GetDeviceInfo(ctx context.Context) (*protocol.DeviceInfo, error) {
+	regs, err := b.ReadRegisters(ctx, protocol.DeviceInfoStart, protocol.DeviceInfoCount)
+	if err != nil {
+		return nil, err
+	}
+	return protocol.ParseDeviceInfo(regs), nil
+}
+
+// averageTemp calculates the average of temperature readings
+func averageTemp(temps []int) float64 {
+	if len(temps) == 0 {
+		return 0
+	}
+	sum := 0
+	for _, t := range temps {
+		sum += t
+	}
+	return float64(sum) / float64(len(temps))
 }

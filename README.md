@@ -1,7 +1,5 @@
 # Voltgo
 
-> **Note:** This library is not currently working. Help is very welcome!
-
 A Go library for communicating with Voltgo (and compatible) LiFePO4 batteries via Bluetooth Low Energy (BLE).
 
 These batteries are sold under various brand names including **Enerwatt**, **TCED Worldwide**, and others, but all use the same BLE protocol compatible with the [Voltgo mobile app](https://voltgopower.com/products/voltgo-25-6v-100ah-lifepo-multipurpose-battery).
@@ -11,9 +9,10 @@ This library provides a simple interface to connect to and monitor LiFePO4 batte
 ## Features
 
 - BLE communication with Voltgo LiFePO4 battery BMS
-- Read battery status (voltage, current, SOC, temperature)
+- Read battery status (voltage, current, SOC, SOH, temperatures)
 - Read individual cell voltages
-- Protocol implementation based on Voltgo app
+- Read device info (model, capacity, manufacture date)
+- Modbus RTU over BLE GATT protocol, verified against real hardware
 - Cross-platform support (Linux, macOS, Windows)
 - Built on TinyGo Bluetooth library
 - Compatible with Enerwatt, TCED Worldwide, and other branded batteries using the Voltgo protocol
@@ -42,9 +41,8 @@ voltgo/
 ├── ble/              # BLE connection handling
 │   ├── connection.go
 │   └── uuids.go
-├── protocol/         # Protocol packet handling
-│   ├── commands.go
-│   ├── packet.go
+├── protocol/         # Modbus RTU framing and register parsing
+│   ├── modbus.go
 │   └── parser.go
 ├── examples/         # Example applications
 │   ├── basic/
@@ -173,8 +171,8 @@ cells, err := battery.GetCellVoltages(ctx)
 // Get battery info
 info, err := battery.GetInfo(ctx)
 
-// Send raw command
-response, err := battery.SendCommand(ctx, cmdByte, data)
+// Read raw Modbus holding registers
+regs, err := battery.ReadRegisters(ctx, startReg, count)
 
 // Disconnect
 battery.Disconnect()
@@ -182,21 +180,15 @@ battery.Disconnect()
 
 ## Development Status
 
-The protocol has been reverse-engineered from the Voltgo Android app, but **communication with real hardware is not yet working**. Help debugging is very welcome!
+The protocol (Modbus RTU over BLE GATT) has been reverse-engineered from HCI
+traces and live probing, and is verified working against real ZT-25.6V100Ah
+batteries on Linux/BlueZ.
 
-### What's Done
+Known gaps (see [PROTOCOL.md](PROTOCOL.md)):
 
-- [x] Command IDs identified (0x03 for BMS info)
-- [x] Response parsing implemented with full byte-level decoding
-- [x] Complete data field mappings (voltage, current, SOC, SOH, cells, temps)
-- [x] Protection status parsing with flag decoding
-- [x] Multi-packet support for >16 cell batteries
-- [x] Checksum validation
-
-### What's Not Working
-
-- [ ] Actual BLE communication with batteries - commands are sent but no responses received
-- [ ] Unknown if protocol interpretation is correct without working hardware tests
+- Current scaling/sign is assumed (int16, 0.1A) but has only been observed at 0A idle
+- Status/protection flag registers are unmapped (all zero on a healthy battery)
+- Write commands (charge/discharge switches, heating) are not yet implemented
 
 ## Contributing
 

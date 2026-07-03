@@ -88,7 +88,7 @@ make vet
 voltgo/
 ├── battery/          # Battery data structures
 ├── ble/             # BLE connection handling
-├── protocol/        # Protocol packet handling
+├── protocol/        # Modbus RTU framing and register parsing
 ├── examples/        # Example applications
 ├── client.go        # Main client interface
 └── PROTOCOL.md      # Protocol documentation
@@ -96,48 +96,39 @@ voltgo/
 
 ## Areas Needing Help
 
-### 1. Protocol Reverse Engineering
+### 1. Register Map Completion
 
-If you have access to hardware, you can help by:
+The protocol (Modbus RTU over BLE) is working, but parts of the register map
+are unmapped or unverified (see PROTOCOL.md). If you have hardware, you can
+help by:
 
-- Capturing BLE traffic between the Voltgo app and battery
-- Documenting command/response pairs
-- Testing edge cases and unusual battery states
+- Reading the status block under load (charging/discharging) to verify the
+  current register's sign and scaling
+- Triggering protection states (carefully!) to map the flag registers
 - Documenting differences between battery models
 
-**Tools for BLE Sniffing:**
-- nRF Sniffer (Nordic Semiconductor)
-- Ubertooth
-- Wireshark with BLE support
-- Android HCI snoop log
+**Tools:**
+- `voltgo-cli read <MAC>` plus `Battery.ReadRegisters()` for raw probing
+- Wireshark with BLE support / `btmon` on Linux
+- Android HCI snoop log — use a **full** btsnoop capture, not the bugreport
+  btsnooz log, which truncates packet payloads
 
 ### 2. Command Implementation
 
-Once command IDs are identified, implement:
+The Voltgo app also writes configuration/control frames (charge/discharge
+switches, heating) that are not yet re-derived from a full-length capture:
 
-- `GetStatus()` - Read voltage, current, SOC, temperature
-- `GetCellVoltages()` - Read individual cell voltages
-- `GetProtectionStatus()` - Read protection flags
-- `GetInfo()` - Read battery/BMS info
-- Any additional commands discovered
+- Modbus function `0x10` (write multiple registers) traffic
+- `0x64`-family firmware OTA commands on the secondary service
 
-### 3. Response Parsing
-
-Implement parsers in the client methods to convert raw bytes to structured data:
-
-- Voltage/current scaling factors
-- Temperature conversion
-- Cell data parsing
-- Protection status bits
-
-### 4. Testing
+### 3. Testing
 
 - Unit tests for protocol encoding/decoding
 - Integration tests with mock data
 - Hardware tests with real batteries
 - Cross-platform testing (Linux, macOS, Windows)
 
-### 5. Documentation
+### 4. Documentation
 
 - Add godoc comments to all exported types/functions
 - Update README with real-world examples

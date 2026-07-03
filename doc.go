@@ -39,7 +39,7 @@
 //
 //   - battery: Data structures for battery status, cell information, and device info
 //   - ble: Low-level BLE connection handling and characteristic I/O
-//   - protocol: Packet encoding/decoding
+//   - protocol: Modbus RTU framing and register parsing
 //
 // Protocol Details:
 //
@@ -48,9 +48,10 @@
 //   - Write: 00001008-0000-1000-8000-00805f9b34fb
 //   - Notify: 00001007-0000-1000-8000-00805f9b34fb
 //
-// BLE packets use the format:
-//
-//	[VER][CMD][DATA...]
-//
-// Where VER is 0x01, CMD is the command byte, and DATA is the payload.
+// The batteries speak Modbus RTU framed over GATT: a standard Modbus
+// read-holding-registers request (slave address 0x01, function 0x03,
+// CRC-16/MODBUS) is written to the write characteristic, and the response
+// frame arrives as a notification on the notify characteristic. Frames with
+// an invalid CRC are silently ignored by the BMS. See PROTOCOL.md for the
+// register map.
 package voltgo
