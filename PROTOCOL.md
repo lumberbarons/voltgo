@@ -98,9 +98,12 @@ at rest/zero so far.
 | 23–24 | Unknown | - | duplicate SOH/SOC values; mapping uncertain |
 | 25–28 | Unknown (likely status/protection flags) | - | *unverified* — all zero on a healthy battery |
 | 29 | Unknown | - | observed value 2 (possibly MOS state bitmap) |
+| 30 | Unknown | - | always 0 in observations |
 | 31–33 | Unknown | - | observed `0x1575`, `0x2a00`, `0x1b1b` (0x1b1b = two bytes of 27 — possibly MOS/ambient temps) |
+| 34–35 | Unknown | - | always 0 in observations |
 | 36 | Cell count | direct | verified (8) |
 | 37 | Full capacity | ×0.1 Ah | verified (1000 = 100.0 Ah) |
+| 38–40 | Unknown | - | always 0 in observations |
 
 Reads of undefined regions return zeros rather than Modbus exceptions.
 Function `0x04` (read input registers) is answered as if it were `0x03`.

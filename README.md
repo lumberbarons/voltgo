@@ -52,6 +52,9 @@ voltgo/
 │   └── voltgo-cli/
 ├── client.go         # Main client interface
 ├── doc.go
+├── Makefile
+├── CONTRIBUTING.md   # Contributor guide
+├── PROTOCOL.md       # Reverse-engineered protocol documentation
 ├── go.mod
 └── README.md
 ```
@@ -93,6 +96,20 @@ func main() {
     }
 }
 ```
+
+You should see output like:
+
+```
+1. ZT-25.6V100Ah-1238 (a4:c1:37:43:a4:42) - RSSI: -62 dBm
+```
+
+If nothing shows up:
+
+- On Linux, make sure your user has permission to use the Bluetooth adapter
+  (typically membership in the `bluetooth` group) and that `bluetoothd` is
+  running.
+- A battery that is already connected to the Voltgo phone app stops
+  advertising and won't appear in scans — disconnect the app first.
 
 ### Reading Battery Status
 
@@ -146,11 +163,17 @@ See the `examples/` directory for complete working examples:
 // Create a new client
 client, err := voltgo.NewClient()
 
-// Scan for devices
+// Scan for devices (returns display-oriented battery.DeviceInfo)
 devices, err := client.Scan(ctx, duration)
 
-// Connect to a device
-battery, err := client.Connect(ctx, device)
+// Scan returning raw BLE results — use this when you intend to connect
+results, err := client.ScanRaw(ctx, duration)
+
+// Connect to a device by BLE address
+battery, err := client.Connect(ctx, results[0].Address)
+
+// Connect to a device by scan result index
+battery, err := client.ConnectByIndex(ctx, results, 0)
 
 // Close the client
 client.Close()
@@ -170,6 +193,12 @@ cells, err := battery.GetCellVoltages(ctx)
 
 // Get battery info
 info, err := battery.GetInfo(ctx)
+
+// Get the parsed status register block, including raw register values
+bmsInfo, err := battery.GetBMSInfo(ctx)
+
+// Get the ASCII device-info register block (model, hw version, date)
+devInfo, err := battery.GetDeviceInfo(ctx)
 
 // Read raw Modbus holding registers
 regs, err := battery.ReadRegisters(ctx, startReg, count)
