@@ -8,8 +8,8 @@ Go library for monitoring Voltgo (and compatible) LiFePO4 batteries over BLE. Th
 |------|------|--------------|
 | `client.go` | Public client and battery API | Adding or changing exported methods |
 | `battery/` | Battery data structures returned to callers | Changing status, cell, or info types |
-| `ble/` | BLE connection handling and GATT UUIDs | Debugging connection or notification issues |
-| `protocol/` | Modbus RTU framing and register parsing | Changing frame encoding or the register map |
+| `internal/ble/` | BLE connection handling and GATT UUIDs | Debugging connection or notification issues |
+| `internal/protocol/` | Modbus RTU framing and register parsing | Changing frame encoding or the register map |
 | `cmd/voltgo-cli/` | CLI tool (scan, read) | Adding or changing CLI commands |
 | `examples/` | Example applications (scan, basic, monitor) | Writing usage documentation or new examples |
 | `doc.go` | Package godoc with usage overview | Updating the public API surface |

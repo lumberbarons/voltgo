@@ -81,10 +81,10 @@ make fmt
 CI enforces [golangci-lint](https://golangci-lint.run/) using the repo's `.golangci.yml` config. Run it locally before pushing:
 
 ```bash
-golangci-lint run
+make lint
 ```
 
-`make vet` runs `go vet` only, which is a subset of what CI checks.
+`make check` runs fmt, vet, and lint together.
 
 ### Pre-commit Hooks (optional)
 
@@ -98,13 +98,14 @@ pre-commit install
 
 ```
 voltgo/
-├── battery/          # Battery data structures
-├── ble/             # BLE connection handling
-├── protocol/        # Modbus RTU framing and register parsing
-├── cmd/             # CLI tools (voltgo-cli)
-├── examples/        # Example applications
-├── client.go        # Main client interface
-└── PROTOCOL.md      # Protocol documentation
+├── battery/            # Battery data structures returned to callers
+├── internal/
+│   ├── ble/            # BLE connection handling
+│   └── protocol/       # Modbus RTU framing and register parsing
+├── cmd/                # CLI tools (voltgo-cli)
+├── examples/           # Example applications
+├── client.go           # Main client interface
+└── PROTOCOL.md         # Protocol documentation
 ```
 
 ## Areas Needing Help

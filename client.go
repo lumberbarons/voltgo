@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"tinygo.org/x/bluetooth"
-
 	"github.com/lumberbarons/voltgo/battery"
-	"github.com/lumberbarons/voltgo/ble"
-	"github.com/lumberbarons/voltgo/protocol"
+	"github.com/lumberbarons/voltgo/internal/ble"
+	"github.com/lumberbarons/voltgo/internal/protocol"
 )
 
 const (
@@ -53,14 +51,16 @@ func (c *Client) Scan(ctx context.Context, duration time.Duration) ([]battery.De
 	return devices, nil
 }
 
-// ScanRaw scans for nearby batteries and returns raw scan results
-func (c *Client) ScanRaw(ctx context.Context, duration time.Duration) ([]bluetooth.ScanResult, error) {
-	return c.conn.Scan(ctx, duration)
-}
+// Connect connects to a battery device by the address string reported in
+// battery.DeviceInfo: a MAC address ("a4:c1:37:43:a4:42"), or on macOS the
+// CoreBluetooth UUID assigned during scanning.
+func (c *Client) Connect(ctx context.Context, address string) (*Battery, error) {
+	addr, err := ble.ParseAddress(address)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address %q: %w", address, err)
+	}
 
-// Connect connects to a battery device by address
-func (c *Client) Connect(ctx context.Context, address bluetooth.Address) (*Battery, error) {
-	if err := c.conn.Connect(ctx, address); err != nil {
+	if err := c.conn.Connect(ctx, addr); err != nil {
 		return nil, err
 	}
 
@@ -69,23 +69,22 @@ func (c *Client) Connect(ctx context.Context, address bluetooth.Address) (*Batte
 	}, nil
 }
 
-// ConnectByIndex connects to a battery device by scan result index
-func (c *Client) ConnectByIndex(ctx context.Context, results []bluetooth.ScanResult, index int) (*Battery, error) {
-	if index < 0 || index >= len(results) {
-		return nil, fmt.Errorf("index out of range: %d", index)
-	}
-
-	return c.Connect(ctx, results[index].Address)
-}
-
 // Close closes the client and releases resources
 func (c *Client) Close() error {
 	return c.conn.Disconnect()
 }
 
+// transport is the subset of ble.Connection that Battery uses. It exists so
+// battery queries can be unit-tested against canned response frames.
+type transport interface {
+	Request(ctx context.Context, frame []byte, timeout time.Duration) ([]byte, error)
+	Disconnect() error
+	IsConnected() bool
+}
+
 // Battery represents a connected battery
 type Battery struct {
-	conn *ble.Connection
+	conn transport
 }
 
 // Disconnect disconnects from the battery
@@ -118,7 +117,7 @@ func (b *Battery) ReadRegisters(ctx context.Context, startReg, count uint16) ([]
 
 // GetBMSInfo reads and parses the status register block. This is the
 // low-level variant of GetStatus and includes the raw registers.
-func (b *Battery) GetBMSInfo(ctx context.Context) (*protocol.BMSInfo, error) {
+func (b *Battery) GetBMSInfo(ctx context.Context) (*battery.BMSInfo, error) {
 	regs, err := b.ReadRegisters(ctx, 0, protocol.StatusRegisterCount)
 	if err != nil {
 		return nil, err
@@ -180,15 +179,16 @@ func (b *Battery) GetInfo(ctx context.Context) (*battery.Info, error) {
 		CapacityAh:     bmsInfo.FullCapacityAh,
 	}
 
-	if devInfo, err := b.GetDeviceInfo(ctx); err == nil {
-		info.DeviceStrings = devInfo.Strings
+	if identity, err := b.GetDeviceIdentity(ctx); err == nil {
+		info.DeviceStrings = identity.Strings
 	}
 
 	return info, nil
 }
 
-// GetDeviceInfo reads the ASCII device-info register block.
-func (b *Battery) GetDeviceInfo(ctx context.Context) (*protocol.DeviceInfo, error) {
+// GetDeviceIdentity reads the ASCII device-info register block (model,
+// hardware version, manufacture date).
+func (b *Battery) GetDeviceIdentity(ctx context.Context) (*battery.DeviceIdentity, error) {
 	regs, err := b.ReadRegisters(ctx, protocol.DeviceInfoStart, protocol.DeviceInfoCount)
 	if err != nil {
 		return nil, err

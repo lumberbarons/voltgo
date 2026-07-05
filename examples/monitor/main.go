@@ -28,30 +28,30 @@ func main() {
 
 	// Scan for devices
 	fmt.Printf("Scanning for batteries (%v)...\n", *scanDuration)
-	rawResults, err := client.ScanRaw(ctx, *scanDuration)
+	devices, err := client.Scan(ctx, *scanDuration)
 	if err != nil {
 		client.Close()
 		//nolint:gocritic // Cleanup done before exit
 		log.Fatalf("Failed to scan: %v", err)
 	}
 
-	if len(rawResults) == 0 {
+	if len(devices) == 0 {
 		log.Fatal("No batteries found")
 	}
 
-	fmt.Printf("\nFound %d device(s):\n", len(rawResults))
-	for i, result := range rawResults {
+	fmt.Printf("\nFound %d device(s):\n", len(devices))
+	for i, device := range devices {
 		fmt.Printf("  %d. %s (%s) - RSSI: %d dBm\n",
-			i, result.LocalName(), result.Address.String(), result.RSSI)
+			i, device.Name, device.Address, device.RSSI)
 	}
 
 	// Connect to selected device
-	if *deviceIndex < 0 || *deviceIndex >= len(rawResults) {
-		log.Fatalf("Invalid device index: %d (must be 0-%d)", *deviceIndex, len(rawResults)-1)
+	if *deviceIndex < 0 || *deviceIndex >= len(devices) {
+		log.Fatalf("Invalid device index: %d (must be 0-%d)", *deviceIndex, len(devices)-1)
 	}
 
 	fmt.Printf("\nConnecting to device %d...\n", *deviceIndex)
-	battery, err := client.ConnectByIndex(ctx, rawResults, *deviceIndex)
+	battery, err := client.Connect(ctx, devices[*deviceIndex].Address)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}

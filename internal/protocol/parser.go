@@ -3,6 +3,8 @@ package protocol
 import (
 	"fmt"
 	"strings"
+
+	"github.com/lumberbarons/voltgo/battery"
 )
 
 // Register map for the status block (holding registers 0-40). Derived from
@@ -31,27 +33,13 @@ const (
 	tempSensors  = 3
 )
 
-// BMSInfo contains battery management system data parsed from the status
-// register block.
-type BMSInfo struct {
-	Voltage        float64   // pack voltage in volts
-	Current        float64   // pack current in amps (positive=charge, negative=discharge)
-	CellVoltages   []float64 // per-cell voltages in volts
-	CellCount      int       // number of cells in series
-	SOC            int       // state of charge, percent
-	SOH            int       // state of health, percent
-	Temperatures   []int     // temperature sensor readings in °C
-	FullCapacityAh float64   // full capacity in Ah
-	RawRegisters   []uint16  // complete register block for fields not yet mapped
-}
-
 // ParseBMSInfo parses the status register block (registers 0-40).
-func ParseBMSInfo(regs []uint16) (*BMSInfo, error) {
+func ParseBMSInfo(regs []uint16) (*battery.BMSInfo, error) {
 	if len(regs) < RegFullCapacity+1 {
 		return nil, fmt.Errorf("register block too short: %d registers, need %d", len(regs), RegFullCapacity+1)
 	}
 
-	info := &BMSInfo{
+	info := &battery.BMSInfo{
 		Voltage:        float64(regs[RegVoltage]) / 100.0,
 		Current:        float64(int16(regs[RegCurrent])) / 10.0,
 		SOC:            int(regs[RegSOC]),
@@ -78,15 +66,9 @@ func ParseBMSInfo(regs []uint16) (*BMSInfo, error) {
 	return info, nil
 }
 
-// DeviceInfo contains the ASCII identity strings from the device-info
-// register block.
-type DeviceInfo struct {
-	Strings []string // NUL-separated ASCII fields, e.g. model, hw version, date
-}
-
 // ParseDeviceInfo extracts printable ASCII fields from the device-info
 // register block (registers 105+).
-func ParseDeviceInfo(regs []uint16) *DeviceInfo {
+func ParseDeviceInfo(regs []uint16) *battery.DeviceIdentity {
 	raw := make([]byte, 0, len(regs)*2)
 	for _, r := range regs {
 		raw = append(raw, byte(r>>8), byte(r&0xFF))
@@ -98,7 +80,7 @@ func ParseDeviceInfo(regs []uint16) *DeviceInfo {
 			fields = append(fields, part)
 		}
 	}
-	return &DeviceInfo{Strings: fields}
+	return &battery.DeviceIdentity{Strings: fields}
 }
 
 func isPrintableASCII(s string) bool {

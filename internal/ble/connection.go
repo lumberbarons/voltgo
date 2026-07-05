@@ -89,6 +89,16 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 		return errors.New("already connected")
 	}
 
+	// Discard any notifications left over from a previous connection.
+drain:
+	for {
+		select {
+		case <-c.responses:
+		default:
+			break drain
+		}
+	}
+
 	device, err := c.adapter.Connect(address, bluetooth.ConnectionParams{
 		ConnectionTimeout: bluetooth.NewDuration(30 * time.Second),
 	})
@@ -174,9 +184,9 @@ func (c *Connection) Disconnect() error {
 	}
 
 	c.connected = false
-	close(c.responses)
-	c.responses = make(chan []byte, 10)
-
+	// The responses channel is intentionally left open: the notification
+	// callback may still fire after disconnect, and sending on a closed
+	// channel would panic. Stale frames are drained on Connect and Request.
 	return nil
 }
 

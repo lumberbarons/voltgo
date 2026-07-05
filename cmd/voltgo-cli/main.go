@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/lumberbarons/voltgo"
 	"github.com/urfave/cli/v3"
+
+	"github.com/lumberbarons/voltgo"
 )
 
 func main() {
@@ -89,29 +91,28 @@ func readCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 	defer client.Close()
 
-	// First scan to find the device
+	// The battery must be advertising to accept a connection, so scan to
+	// confirm it's visible before connecting.
 	fmt.Println("Scanning for device...")
-	results, err := client.ScanRaw(ctx, 10*time.Second)
+	devices, err := client.Scan(ctx, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to scan: %w", err)
 	}
 
-	// Find the device by MAC address
-	var deviceIndex = -1
-	for i, result := range results {
-		if result.Address.String() == macAddr {
-			deviceIndex = i
+	found := false
+	for _, device := range devices {
+		if strings.EqualFold(device.Address, macAddr) {
+			found = true
 			break
 		}
 	}
-
-	if deviceIndex == -1 {
+	if !found {
 		return fmt.Errorf("device with address %s not found", macAddr)
 	}
 
 	// Connect to the device
 	fmt.Println("Connecting...")
-	battery, err := client.ConnectByIndex(ctx, results, deviceIndex)
+	battery, err := client.Connect(ctx, macAddr)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}

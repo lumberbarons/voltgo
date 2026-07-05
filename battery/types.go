@@ -32,6 +32,26 @@ type Info struct {
 // DeviceInfo represents discovered BLE device information
 type DeviceInfo struct {
 	Name    string // Device name
-	Address string // BLE MAC address
+	Address string // BLE address (MAC address, or CoreBluetooth UUID on macOS)
 	RSSI    int16  // Signal strength
+}
+
+// BMSInfo contains battery management system data parsed from the status
+// register block.
+type BMSInfo struct {
+	Voltage        float64   // pack voltage in volts
+	Current        float64   // pack current in amps (positive=charge, negative=discharge)
+	CellVoltages   []float64 // per-cell voltages in volts
+	CellCount      int       // number of cells in series
+	SOC            int       // state of charge, percent
+	SOH            int       // state of health, percent
+	Temperatures   []int     // temperature sensor readings in °C
+	FullCapacityAh float64   // full capacity in Ah
+	RawRegisters   []uint16  // complete register block for fields not yet mapped
+}
+
+// DeviceIdentity contains the ASCII identity strings from the device-info
+// register block.
+type DeviceIdentity struct {
+	Strings []string // NUL-separated ASCII fields, e.g. model, hw version, date
 }
