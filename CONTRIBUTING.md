@@ -241,6 +241,23 @@ Example:
 - ...
 ```
 
+## Releases
+
+Releases are annotated git tags plus a GitHub release with matching notes.
+Keep the notes format consistent across releases:
+
+- One-sentence summary of the release on the first line, no heading
+- Then `##` sections in this order, omitting any that are empty:
+  - `Breaking changes since vX.Y.Z` (the previous release)
+  - `Added`
+  - `Fixed`
+  - `Protocol` (register-map verifications, known gaps, capture requests)
+- Reference PR numbers inline, e.g. `(#9)`
+- End with a full-changelog compare link:
+  `**Full changelog**: https://github.com/lumberbarons/voltgo/compare/vPREV...vNEW`
+
+See the [v0.2.0 release](https://github.com/lumberbarons/voltgo/releases/tag/v0.2.0) for a complete example.
+
 ## Code of Conduct
 
 - Be respectful and constructive
