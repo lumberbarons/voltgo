@@ -32,7 +32,9 @@ func NewClient() (*Client, error) {
 	}, nil
 }
 
-// Scan scans for nearby batteries and returns device info
+// Scan scans for nearby batteries and returns device info. A device that
+// advertised more than once during the scan window appears once, with the
+// data from its most recent advertisement.
 func (c *Client) Scan(ctx context.Context, duration time.Duration) ([]battery.DeviceInfo, error) {
 	results, err := c.conn.Scan(ctx, duration)
 	if err != nil {
@@ -48,7 +50,30 @@ func (c *Client) Scan(ctx context.Context, duration time.Duration) ([]battery.De
 		})
 	}
 
-	return devices, nil
+	return dedupeDevices(devices), nil
+}
+
+// dedupeDevices collapses repeated advertisements from the same address into
+// one entry, keeping first-seen order and the freshest RSSI. Scan responses
+// without a name don't erase a name learned from an earlier advertisement.
+func dedupeDevices(devices []battery.DeviceInfo) []battery.DeviceInfo {
+	deduped := make([]battery.DeviceInfo, 0, len(devices))
+	byAddr := make(map[string]int, len(devices))
+
+	for _, device := range devices {
+		i, seen := byAddr[device.Address]
+		if !seen {
+			byAddr[device.Address] = len(deduped)
+			deduped = append(deduped, device)
+			continue
+		}
+		if device.Name == "" {
+			device.Name = deduped[i].Name
+		}
+		deduped[i] = device
+	}
+
+	return deduped
 }
 
 // Connect connects to a battery device by the address string reported in

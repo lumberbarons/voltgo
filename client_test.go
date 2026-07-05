@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lumberbarons/voltgo/battery"
 	"github.com/lumberbarons/voltgo/internal/ble"
 	"github.com/lumberbarons/voltgo/internal/fakebms"
 	"github.com/lumberbarons/voltgo/internal/protocol"
@@ -179,4 +180,26 @@ func TestReadRegisters_ErrorMentionsRegisterRange(t *testing.T) {
 	_, err := b.ReadRegisters(context.Background(), 105, 32)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "105-136")
+}
+
+func TestDedupeDevices(t *testing.T) {
+	in := []battery.DeviceInfo{
+		{Name: "ZT-25.6V100Ah-1238", Address: "A4:C1:37:43:A4:42", RSSI: -73},
+		{Name: "ZT-25.6V100Ah-1221", Address: "A4:C1:37:43:A4:33", RSSI: -77},
+		{Name: "", Address: "A4:C1:37:43:A4:42", RSSI: -70}, // nameless scan response, fresher RSSI
+		{Name: "ZT-25.6V100Ah-1221", Address: "A4:C1:37:43:A4:33", RSSI: -75},
+	}
+
+	out := dedupeDevices(in)
+
+	require.Len(t, out, 2)
+	// First-seen order preserved, freshest RSSI kept, name not erased.
+	assert.Equal(t, "ZT-25.6V100Ah-1238", out[0].Name)
+	assert.Equal(t, int16(-70), out[0].RSSI)
+	assert.Equal(t, "ZT-25.6V100Ah-1221", out[1].Name)
+	assert.Equal(t, int16(-75), out[1].RSSI)
+}
+
+func TestDedupeDevices_Empty(t *testing.T) {
+	assert.Empty(t, dedupeDevices(nil))
 }
