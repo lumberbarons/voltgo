@@ -74,6 +74,26 @@ func NewReadRequest(slaveAddr byte, startReg, count uint16) []byte {
 	return AppendCRC(frame)
 }
 
+// NewReadResponse builds a read-holding-registers response frame carrying
+// the given register values. This is the encoder counterpart of
+// ParseReadResponse, for device emulators and round-trip tests.
+func NewReadResponse(slaveAddr byte, regs []uint16) []byte {
+	frame := make([]byte, 3, 3+len(regs)*2+2)
+	frame[0] = slaveAddr
+	frame[1] = FuncReadHoldingRegisters
+	frame[2] = byte(len(regs) * 2)
+	for _, r := range regs {
+		frame = binary.BigEndian.AppendUint16(frame, r)
+	}
+	return AppendCRC(frame)
+}
+
+// NewExceptionResponse builds a Modbus exception response frame for the
+// given function and exception code, for device emulators.
+func NewExceptionResponse(slaveAddr, function, code byte) []byte {
+	return AppendCRC([]byte{slaveAddr, function | exceptionFlag, code})
+}
+
 // ModbusError is a Modbus exception response from the device.
 type ModbusError struct {
 	Function byte
