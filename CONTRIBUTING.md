@@ -8,7 +8,7 @@ Note: These batteries are sold under various brand names including **Voltgo**, *
 
 The protocol (Modbus RTU over BLE GATT) is implemented and verified against real ZT-25.6V100Ah batteries. The main areas needing development are:
 
-1. **Register Map Completion** - Verifying the current register's sign/scaling under load and mapping the protection flag registers (see PROTOCOL.md)
+1. **Register Map Completion** - Confirming the current register's discharge sign and mapping the protection flag registers (see PROTOCOL.md)
 2. **Write Commands** - Charge/discharge switches and heating control are not yet implemented
 3. **Hardware Coverage** - Testing with other battery models and on macOS/Windows
 4. **Documentation** - Expanding documentation based on real-world usage
@@ -116,8 +116,9 @@ The protocol (Modbus RTU over BLE) is working, but parts of the register map
 are unmapped or unverified (see PROTOCOL.md). If you have hardware, you can
 help by:
 
-- Reading the status block under load (charging/discharging) to verify the
-  current register's sign and scaling
+- Reading the status block while discharging to confirm the current
+  register's negative sign (charging has been observed: +2.7 A at 0.1 A
+  scale)
 - Triggering protection states (carefully!) to map the flag registers
 - Documenting differences between battery models
 

@@ -12,7 +12,7 @@ import (
 // been observed at a non-trivial value yet.
 const (
 	RegVoltage      = 0  // pack voltage, 0.01 V
-	RegCurrent      = 1  // pack current, int16, 0.1 A (sign/scale unverified: always 0 at idle so far)
+	RegCurrent      = 1  // pack current, int16, 0.1 A, positive=charging (observed +2.7 A under charge; discharge sign inferred)
 	RegCellBase     = 2  // cell voltages, 1 mV, 16 slots (regs 2-17)
 	RegTempBase     = 18 // temperature sensors, int16 °C, 3 slots (regs 18-20)
 	RegSOC          = 21 // state of charge, % (regs 21/24 track together; 21 assumed SOC)

@@ -203,7 +203,7 @@ batteries on Linux/BlueZ.
 
 Known gaps (see [PROTOCOL.md](PROTOCOL.md)):
 
-- Current scaling/sign is assumed (int16, 0.1A) but has only been observed at 0A idle
+- Current scaling and charge sign are verified (int16, 0.1A, positive while charging); the discharge sign is still inferred from the int16 encoding
 - Status/protection flag registers are unmapped (all zero on a healthy battery)
 - Write commands (charge/discharge switches, heating) are not yet implemented
 
