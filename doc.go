@@ -16,14 +16,14 @@
 //	}
 //	defer client.Close()
 //
-//	// Scan for batteries (raw results carry the address needed to connect)
-//	results, err := client.ScanRaw(ctx, 10*time.Second)
+//	// Scan for batteries
+//	devices, err := client.Scan(ctx, 10*time.Second)
 //	if err != nil {
 //		log.Fatal(err)
 //	}
 //
-//	// Connect to a device
-//	battery, err := client.Connect(ctx, results[0].Address)
+//	// Connect to a device by its address string
+//	battery, err := client.Connect(ctx, devices[0].Address)
 //	if err != nil {
 //		log.Fatal(err)
 //	}
@@ -35,11 +35,8 @@
 //		log.Fatal(err)
 //	}
 //
-// The library is organized into several packages:
-//
-//   - battery: Data structures for battery status, cell information, and device info
-//   - ble: Low-level BLE connection handling and characteristic I/O
-//   - protocol: Modbus RTU framing and register parsing
+// Data types returned to callers live in the battery package. BLE transport
+// and Modbus framing are implementation details under internal/.
 //
 // Protocol Details:
 //

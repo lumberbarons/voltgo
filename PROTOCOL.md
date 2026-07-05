@@ -90,7 +90,7 @@ at rest/zero so far.
 | Register | Field | Scaling | Notes |
 |----------|-------|---------|-------|
 | 0 | Pack voltage | ×0.01 V | verified (26.83 V observed) |
-| 1 | Pack current | int16, ×0.1 A assumed | *unverified* — always 0 at idle; sign/scale need a load test |
+| 1 | Pack current | int16, ×0.1 A | positive = charging: observed 27 (+2.7 A) on a battery under solar charge, consistent with the charge controller's total across the parallel bank; negative = discharging still inferred from the int16 encoding |
 | 2–17 | Cell voltages | ×1 mV | 16 slots; slots ≥ cell count read 0 |
 | 18–20 | Temperature sensors | int16 °C | 3 sensors (27 °C observed) |
 | 21 | SOC | % | 21/24 track together; 21 assumed SOC |

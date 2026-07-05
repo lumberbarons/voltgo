@@ -8,7 +8,7 @@ Note: These batteries are sold under various brand names including **Voltgo**, *
 
 The protocol (Modbus RTU over BLE GATT) is implemented and verified against real ZT-25.6V100Ah batteries. The main areas needing development are:
 
-1. **Register Map Completion** - Verifying the current register's sign/scaling under load and mapping the protection flag registers (see PROTOCOL.md)
+1. **Register Map Completion** - Confirming the current register's discharge sign and mapping the protection flag registers (see PROTOCOL.md)
 2. **Write Commands** - Charge/discharge switches and heating control are not yet implemented
 3. **Hardware Coverage** - Testing with other battery models and on macOS/Windows
 4. **Documentation** - Expanding documentation based on real-world usage
@@ -81,10 +81,10 @@ make fmt
 CI enforces [golangci-lint](https://golangci-lint.run/) using the repo's `.golangci.yml` config. Run it locally before pushing:
 
 ```bash
-golangci-lint run
+make lint
 ```
 
-`make vet` runs `go vet` only, which is a subset of what CI checks.
+`make check` runs fmt, vet, and lint together.
 
 ### Pre-commit Hooks (optional)
 
@@ -98,13 +98,14 @@ pre-commit install
 
 ```
 voltgo/
-├── battery/          # Battery data structures
-├── ble/             # BLE connection handling
-├── protocol/        # Modbus RTU framing and register parsing
-├── cmd/             # CLI tools (voltgo-cli)
-├── examples/        # Example applications
-├── client.go        # Main client interface
-└── PROTOCOL.md      # Protocol documentation
+├── battery/            # Battery data structures returned to callers
+├── internal/
+│   ├── ble/            # BLE connection handling
+│   └── protocol/       # Modbus RTU framing and register parsing
+├── cmd/                # CLI tools (voltgo-cli)
+├── examples/           # Example applications
+├── client.go           # Main client interface
+└── PROTOCOL.md         # Protocol documentation
 ```
 
 ## Areas Needing Help
@@ -115,8 +116,9 @@ The protocol (Modbus RTU over BLE) is working, but parts of the register map
 are unmapped or unverified (see PROTOCOL.md). If you have hardware, you can
 help by:
 
-- Reading the status block under load (charging/discharging) to verify the
-  current register's sign and scaling
+- Reading the status block while discharging to confirm the current
+  register's negative sign (charging has been observed: +2.7 A at 0.1 A
+  scale)
 - Triggering protection states (carefully!) to map the flag registers
 - Documenting differences between battery models
 

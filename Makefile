@@ -1,4 +1,4 @@
-.PHONY: build test clean examples fmt vet scan cli cli-arm64
+.PHONY: build test clean examples fmt vet lint scan cli cli-arm64
 
 # Build all examples
 build: examples
@@ -29,6 +29,10 @@ fmt:
 vet:
 	go vet ./...
 
+# Run golangci-lint (what CI enforces)
+lint:
+	golangci-lint run
+
 # Run the scan example
 scan: examples
 	./bin/scan
@@ -57,7 +61,7 @@ deps:
 	go mod tidy
 
 # Check for common issues
-check: fmt vet
+check: fmt vet lint
 	@echo "Code checks passed"
 
 # Help
@@ -71,8 +75,9 @@ help:
 	@echo "  clean      - Remove build artifacts"
 	@echo "  fmt        - Format code"
 	@echo "  vet        - Run go vet"
+	@echo "  lint       - Run golangci-lint (what CI enforces)"
 	@echo "  scan       - Run the scan example"
 	@echo "  monitor    - Run the monitor example"
 	@echo "  deps       - Download dependencies"
-	@echo "  check      - Run fmt and vet"
+	@echo "  check      - Run fmt, vet, and lint"
 	@echo "  help       - Show this help message"

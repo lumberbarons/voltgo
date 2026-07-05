@@ -36,25 +36,18 @@ go get github.com/lumberbarons/voltgo
 
 ```
 voltgo/
-├── battery/           # Battery data structures and types
-│   └── types.go
-├── ble/              # BLE connection handling
-│   ├── connection.go
-│   └── uuids.go
-├── protocol/         # Modbus RTU framing and register parsing
-│   ├── modbus.go
-│   └── parser.go
-├── examples/         # Example applications
-│   ├── basic/
-│   ├── monitor/
-│   └── scan/
-├── cmd/              # CLI tools
-│   └── voltgo-cli/
-├── client.go         # Main client interface
+├── battery/            # Battery data structures returned to callers
+├── internal/
+│   ├── ble/            # BLE connection handling
+│   └── protocol/       # Modbus RTU framing and register parsing
+├── examples/           # Example applications (scan, basic, monitor)
+├── cmd/
+│   └── voltgo-cli/     # CLI tool
+├── client.go           # Main client interface
 ├── doc.go
 ├── Makefile
-├── CONTRIBUTING.md   # Contributor guide
-├── PROTOCOL.md       # Reverse-engineered protocol documentation
+├── CONTRIBUTING.md     # Contributor guide
+├── PROTOCOL.md         # Reverse-engineered protocol documentation
 ├── go.mod
 └── README.md
 ```
@@ -84,15 +77,15 @@ func main() {
     }
     defer client.Close()
 
-    // Scan for 10 seconds (returns raw BLE scan results)
-    results, err := client.ScanRaw(ctx, 10*time.Second)
+    // Scan for 10 seconds
+    devices, err := client.Scan(ctx, 10*time.Second)
     if err != nil {
         log.Fatal(err)
     }
 
-    for i, result := range results {
+    for i, device := range devices {
         fmt.Printf("%d. %s (%s) - RSSI: %d dBm\n",
-            i+1, result.LocalName(), result.Address.String(), result.RSSI)
+            i+1, device.Name, device.Address, device.RSSI)
     }
 }
 ```
@@ -114,8 +107,8 @@ If nothing shows up:
 ### Reading Battery Status
 
 ```go
-// Connect to a battery device by address
-battery, err := client.Connect(ctx, results[0].Address)
+// Connect to a battery device by its address string
+battery, err := client.Connect(ctx, devices[0].Address)
 if err != nil {
     log.Fatal(err)
 }
@@ -163,17 +156,12 @@ See the `examples/` directory for complete working examples:
 // Create a new client
 client, err := voltgo.NewClient()
 
-// Scan for devices (returns display-oriented battery.DeviceInfo)
+// Scan for devices
 devices, err := client.Scan(ctx, duration)
 
-// Scan returning raw BLE results — use this when you intend to connect
-results, err := client.ScanRaw(ctx, duration)
-
-// Connect to a device by BLE address
-battery, err := client.Connect(ctx, results[0].Address)
-
-// Connect to a device by scan result index
-battery, err := client.ConnectByIndex(ctx, results, 0)
+// Connect to a device by its address string
+// (MAC address, or CoreBluetooth UUID on macOS)
+battery, err := client.Connect(ctx, devices[0].Address)
 
 // Close the client
 client.Close()
@@ -198,7 +186,7 @@ info, err := battery.GetInfo(ctx)
 bmsInfo, err := battery.GetBMSInfo(ctx)
 
 // Get the ASCII device-info register block (model, hw version, date)
-devInfo, err := battery.GetDeviceInfo(ctx)
+identity, err := battery.GetDeviceIdentity(ctx)
 
 // Read raw Modbus holding registers
 regs, err := battery.ReadRegisters(ctx, startReg, count)
@@ -215,7 +203,7 @@ batteries on Linux/BlueZ.
 
 Known gaps (see [PROTOCOL.md](PROTOCOL.md)):
 
-- Current scaling/sign is assumed (int16, 0.1A) but has only been observed at 0A idle
+- Current scaling and charge sign are verified (int16, 0.1A, positive while charging); the discharge sign is still inferred from the int16 encoding
 - Status/protection flag registers are unmapped (all zero on a healthy battery)
 - Write commands (charge/discharge switches, heating) are not yet implemented
 

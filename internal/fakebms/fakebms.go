@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lumberbarons/voltgo/ble"
-	"github.com/lumberbarons/voltgo/protocol"
+	"github.com/lumberbarons/voltgo/internal/ble"
+	"github.com/lumberbarons/voltgo/internal/protocol"
 )
 
 // Device emulates a battery BMS behind a request/response transport.

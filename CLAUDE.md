@@ -8,9 +8,9 @@ Go library for monitoring Voltgo (and compatible) LiFePO4 batteries over BLE. Th
 |------|------|--------------|
 | `client.go` | Public client and battery API | Adding or changing exported methods |
 | `battery/` | Battery data structures returned to callers | Changing status, cell, or info types |
-| `ble/` | BLE connection handling and GATT UUIDs | Debugging connection or notification issues |
-| `protocol/` | Modbus RTU framing and register parsing | Changing frame encoding or the register map |
-| `protocol/testdata/corpus/` | Captured frames from real batteries, replay-tested | Adding coverage for a new battery model |
+| `internal/ble/` | BLE connection handling and GATT UUIDs | Debugging connection or notification issues |
+| `internal/protocol/` | Modbus RTU framing and register parsing | Changing frame encoding or the register map |
+| `internal/protocol/testdata/corpus/` | Captured frames from real batteries, replay-tested | Adding coverage for a new battery model |
 | `internal/fakebms/` | In-process BMS emulator with fault injection | Writing or extending client-level tests |
 | `cmd/voltgo-cli/` | CLI tool (scan, read) | Adding or changing CLI commands |
 | `examples/` | Example applications (scan, basic, monitor) | Writing usage documentation or new examples |
@@ -25,8 +25,8 @@ Go library for monitoring Voltgo (and compatible) LiFePO4 batteries over BLE. Th
 ## Commands
 
 - Test: `make test`
-- Format + vet: `make check`
-- Lint (what CI enforces): `golangci-lint run`
+- Format + vet + lint: `make check`
+- Lint only (what CI enforces): `make lint`
 - Build examples: `make examples`
 - Build CLI: `make cli` (or `make cli-arm64` for Linux ARM64 targets)
 

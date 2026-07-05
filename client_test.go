@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lumberbarons/voltgo/ble"
+	"github.com/lumberbarons/voltgo/internal/ble"
 	"github.com/lumberbarons/voltgo/internal/fakebms"
-	"github.com/lumberbarons/voltgo/protocol"
+	"github.com/lumberbarons/voltgo/internal/protocol"
 )
 
 // These are component tests: they exercise every public Battery method
@@ -75,7 +75,7 @@ func TestGetInfo(t *testing.T) {
 	assert.Equal(t, []string{"TC", "-8S100-V1.0", "Z01T202024-01-11"}, info.DeviceStrings)
 }
 
-func TestGetInfo_DeviceInfoUnavailable(t *testing.T) {
+func TestGetInfo_DeviceIdentityUnavailable(t *testing.T) {
 	// If the device-info read times out, GetInfo still returns the fields
 	// derived from the status block.
 	b, dev := newTestBattery()
@@ -87,12 +87,12 @@ func TestGetInfo_DeviceInfoUnavailable(t *testing.T) {
 	assert.Empty(t, info.DeviceStrings)
 }
 
-func TestGetDeviceInfo(t *testing.T) {
+func TestGetDeviceIdentity(t *testing.T) {
 	b, _ := newTestBattery()
 
-	info, err := b.GetDeviceInfo(context.Background())
+	identity, err := b.GetDeviceIdentity(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"TC", "-8S100-V1.0", "Z01T202024-01-11"}, info.Strings)
+	assert.Equal(t, []string{"TC", "-8S100-V1.0", "Z01T202024-01-11"}, identity.Strings)
 }
 
 func TestGetBMSInfo_RawRegisters(t *testing.T) {
@@ -163,14 +163,13 @@ func TestAverageTemp(t *testing.T) {
 	assert.Equal(t, -5.0, averageTemp([]int{-10, 0}))
 }
 
-func TestConnectByIndex_OutOfRange(t *testing.T) {
+func TestConnect_InvalidAddress(t *testing.T) {
+	// Address parsing fails before any BLE work happens.
 	c := &Client{}
 
-	_, err := c.ConnectByIndex(context.Background(), nil, 0)
-	assert.Error(t, err)
-
-	_, err = c.ConnectByIndex(context.Background(), nil, -1)
-	assert.Error(t, err)
+	_, err := c.Connect(context.Background(), "not-an-address")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not-an-address")
 }
 
 func TestReadRegisters_ErrorMentionsRegisterRange(t *testing.T) {
