@@ -32,6 +32,7 @@ type Connection struct {
 	connected  bool
 	mu         sync.RWMutex
 	responses  chan []byte
+	done       chan struct{}
 }
 
 // NewConnection creates a new BLE connection handler
@@ -44,6 +45,7 @@ func NewConnection() (*Connection, error) {
 	return &Connection{
 		adapter:   adapter,
 		responses: make(chan []byte, 10),
+		done:      make(chan struct{}),
 	}, nil
 }
 
@@ -87,16 +89,6 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 
 	if c.connected {
 		return errors.New("already connected")
-	}
-
-	// Discard any notifications left over from a previous connection.
-drain:
-	for {
-		select {
-		case <-c.responses:
-		default:
-			break drain
-		}
 	}
 
 	device, err := c.adapter.Connect(address, bluetooth.ConnectionParams{
@@ -148,12 +140,16 @@ drain:
 		return ErrNoCharacteristic
 	}
 
+	// Fresh channels per connection. The notification callback closes over
+	// them (rather than reading the struct fields) so a callback from a
+	// previous connection can never write into the current one's channel.
+	responses := make(chan []byte, 10)
 	if err := c.notifyChar.EnableNotifications(func(buf []byte) {
 		data := make([]byte, len(buf))
 		copy(data, buf)
 
 		select {
-		case c.responses <- data:
+		case responses <- data:
 		default:
 			// Drop if channel is full
 		}
@@ -166,6 +162,8 @@ drain:
 	// Give the device a moment to settle after CCCD write
 	time.Sleep(200 * time.Millisecond)
 
+	c.responses = responses
+	c.done = make(chan struct{})
 	c.connected = true
 	return nil
 }
@@ -184,9 +182,11 @@ func (c *Connection) Disconnect() error {
 	}
 
 	c.connected = false
-	// The responses channel is intentionally left open: the notification
-	// callback may still fire after disconnect, and sending on a closed
-	// channel would panic. Stale frames are drained on Connect and Request.
+	// Wake any reader blocked in ReadFrame. The responses channel is never
+	// closed: a stale notification callback may still hold a reference, and
+	// sending on a closed channel would panic.
+	close(c.done)
+
 	return nil
 }
 
@@ -199,14 +199,15 @@ func (c *Connection) IsConnected() bool {
 
 // WriteFrame writes a raw frame to the device's write characteristic.
 func (c *Connection) WriteFrame(_ context.Context, frame []byte) error {
+	if len(frame) > maxFrameSize {
+		return fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, len(frame))
+	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if !c.connected {
 		return ErrNotConnected
-	}
-	if len(frame) > maxFrameSize {
-		return fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, len(frame))
 	}
 
 	if _, err := c.writeChar.WriteWithoutResponse(frame); err != nil {
@@ -222,14 +223,17 @@ func (c *Connection) ReadFrame(ctx context.Context, timeout time.Duration) ([]by
 		c.mu.RUnlock()
 		return nil, ErrNotConnected
 	}
+	responses, done := c.responses, c.done
 	c.mu.RUnlock()
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
-	case data := <-c.responses:
+	case data := <-responses:
 		return data, nil
+	case <-done:
+		return nil, ErrNotConnected
 	case <-timer.C:
 		return nil, ErrTimeout
 	case <-ctx.Done():
@@ -240,10 +244,14 @@ func (c *Connection) ReadFrame(ctx context.Context, timeout time.Duration) ([]by
 // Request writes a frame and waits for the response notification. Any stale
 // notifications queued before the write are discarded.
 func (c *Connection) Request(ctx context.Context, frame []byte, timeout time.Duration) ([]byte, error) {
+	c.mu.RLock()
+	responses := c.responses
+	c.mu.RUnlock()
+
 drain:
 	for {
 		select {
-		case <-c.responses:
+		case <-responses:
 		default:
 			break drain
 		}
