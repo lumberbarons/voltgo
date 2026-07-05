@@ -83,9 +83,28 @@ func (c *Client) Close() error {
 	return c.conn.Disconnect()
 }
 
+// Transport is the request/response link a Battery uses to reach the BMS.
+// *ble.Connection implements it; tests and alternative transports (e.g. an
+// in-process emulator) can substitute their own.
+type Transport interface {
+	// Request writes a Modbus RTU frame and returns the response frame.
+	Request(ctx context.Context, frame []byte, timeout time.Duration) ([]byte, error)
+	Disconnect() error
+	IsConnected() bool
+}
+
+var _ Transport = (*ble.Connection)(nil)
+
 // Battery represents a connected battery
 type Battery struct {
-	conn *ble.Connection
+	conn Transport
+}
+
+// NewBattery wraps an existing transport in a Battery. Most callers should
+// use Client.Connect instead; this constructor exists for custom transports
+// and testing.
+func NewBattery(t Transport) *Battery {
+	return &Battery{conn: t}
 }
 
 // Disconnect disconnects from the battery

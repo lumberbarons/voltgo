@@ -136,8 +136,10 @@ switches, heating) that are not yet re-derived from a full-length capture:
 
 ### 3. Testing
 
-- Unit tests for protocol encoding/decoding
-- Integration tests with mock data
+- **Frame captures from other battery models** — the easiest high-value
+  contribution. Drop a captured response frame into
+  `protocol/testdata/corpus/<model>/` (see the README there) and the parsers
+  are validated against your hardware forever, no CI hardware needed
 - Hardware tests with real batteries
 - Cross-platform testing (Linux, macOS, Windows)
 
@@ -163,13 +165,17 @@ switches, heating) that are not yet re-derived from a full-length capture:
 - Test all protocol encoding/decoding
 - Test CRC16 calculations
 - Test packet validation
-- Mock BLE connections for client tests
+- Fuzz targets live in `protocol/fuzz_test.go`; run longer campaigns with
+  `go test -fuzz=FuzzParseReadResponse ./protocol`
 
-### Integration Tests
+### Component Tests
 
-- Use recorded BLE traffic for replay testing
-- Test error handling
-- Test timeout scenarios
+- Client-level tests run against `internal/fakebms`, an in-process BMS
+  emulator that speaks real Modbus frames and can inject faults (silent
+  drops, corrupt CRCs, truncation, exception responses) — extend it rather
+  than hand-rolling response bytes in tests
+- Captured frames from real batteries live in `protocol/testdata/corpus/`
+  and are replay-tested against the parsers
 
 ### Hardware Tests
 
