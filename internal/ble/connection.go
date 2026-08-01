@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,9 +23,63 @@ var (
 // maxFrameSize is the size of the device's write characteristic buffer.
 const maxFrameSize = 200
 
+const (
+	// connectAttempts bounds how many times a link is opened before the
+	// failure reaches the caller.
+	//
+	// The abort this works around is intermittent, and how often it strikes
+	// drifts over time: measured against a ZT-25.6V100Ah on BlueZ 5.64, runs
+	// of dials that nearly all abort alternate with stretches that mostly
+	// succeed. A dial that fails is torn down about half a second after the
+	// link comes up, having exchanged no ATT traffic at all, so retrying
+	// costs little. Six attempts covered every observed run; the worst case
+	// is a few seconds spent before the error reaches the caller.
+	connectAttempts = 6
+
+	// connectRetryDelay separates attempts, leaving the adapter time to tear
+	// the aborted link down before the next one is opened.
+	connectRetryDelay = 500 * time.Millisecond
+)
+
+// peerAbortReasons are the BlueZ disconnect reasons that mean a link formed
+// and was then torn down, rather than never forming at all. Only these are
+// worth retrying: a missing device or an unreachable address fails the same
+// way every time, and retrying it only delays the error the caller needs.
+//
+// BlueZ reports the reason as text on the D-Bus error and tinygo passes it
+// through unchanged, so matching on that text is the only handle available.
+var peerAbortReasons = []string{
+	"le-connection-abort-by-local",
+	"br-connection-canceled",
+}
+
+// abortedByPeer reports whether err is a link that was established and then
+// aborted, as opposed to one that never came up.
+func abortedByPeer(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	for _, reason := range peerAbortReasons {
+		if strings.Contains(msg, reason) {
+			return true
+		}
+	}
+	return false
+}
+
+// dialFunc opens the low-level link. It matches (*bluetooth.Adapter).Connect,
+// so the real adapter satisfies it directly and tests can substitute a stub
+// without an adapter or a battery.
+type dialFunc func(bluetooth.Address, bluetooth.ConnectionParams) (bluetooth.Device, error)
+
 // Connection represents a BLE connection to a battery
 type Connection struct {
 	adapter    *bluetooth.Adapter
+	dial       dialFunc
+	attempts   int
+	retryDelay time.Duration
 	device     bluetooth.Device
 	service    bluetooth.DeviceService
 	writeChar  bluetooth.DeviceCharacteristic
@@ -43,9 +98,12 @@ func NewConnection() (*Connection, error) {
 	}
 
 	return &Connection{
-		adapter:   adapter,
-		responses: make(chan []byte, 10),
-		done:      make(chan struct{}),
+		adapter:    adapter,
+		dial:       adapter.Connect,
+		attempts:   connectAttempts,
+		retryDelay: connectRetryDelay,
+		responses:  make(chan []byte, 10),
+		done:       make(chan struct{}),
 	}, nil
 }
 
@@ -83,7 +141,11 @@ func (c *Connection) Scan(ctx context.Context, duration time.Duration) ([]blueto
 
 // Connect connects to a BLE device by address and prepares the battery's
 // write and notify characteristics.
-func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error {
+//
+// A link the battery accepts and then aborts is retried rather than returned
+// on the first failure; see peerAbortReasons for why that failure is treated
+// differently from every other connect error.
+func (c *Connection) Connect(ctx context.Context, address bluetooth.Address) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -91,7 +153,69 @@ func (c *Connection) Connect(_ context.Context, address bluetooth.Address) error
 		return errors.New("already connected")
 	}
 
-	device, err := c.adapter.Connect(address, bluetooth.ConnectionParams{
+	dial, attempts, delay := c.dial, c.attempts, c.retryDelay
+	if dial == nil {
+		dial = c.adapter.Connect
+	}
+	if attempts <= 0 {
+		attempts = connectAttempts
+	}
+	if delay <= 0 {
+		delay = connectRetryDelay
+	}
+
+	return retryPeerAborts(ctx, attempts, delay, func() error {
+		return c.establish(dial, address)
+	})
+}
+
+// retryPeerAborts runs establish until it succeeds, fails for a reason other
+// than a peer abort, or exhausts the attempt budget. The backoff between
+// attempts is skipped after the final one, and a cancelled context ends the
+// retries with both the abort and the cancellation preserved.
+func retryPeerAborts(ctx context.Context, attempts int, delay time.Duration, establish func() error) error {
+	var err error
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err = establish()
+		if err == nil {
+			return nil
+		}
+		if !abortedByPeer(err) || attempt == attempts {
+			return err
+		}
+		if waitErr := sleepCtx(ctx, delay); waitErr != nil {
+			return errors.Join(err, waitErr)
+		}
+	}
+
+	return err
+}
+
+// sleepCtx waits for d, returning early if ctx is done first.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// establish opens one link and prepares the battery's characteristics.
+//
+// Service discovery follows the dial immediately and with nothing in
+// between. The battery drops a link whose ATT MTU negotiation is slow to
+// arrive, so work inserted between these two steps eats into that budget;
+// anything that can be done before the dial belongs before it, not here.
+// On a link that survives, an hci trace puts the MTU request about half a
+// second after the connection completes and the response about 300ms later,
+// comfortably inside the window.
+func (c *Connection) establish(dial dialFunc, address bluetooth.Address) error {
+	device, err := dial(address, bluetooth.ConnectionParams{
 		ConnectionTimeout: bluetooth.NewDuration(30 * time.Second),
 	})
 	if err != nil {
