@@ -1,4 +1,21 @@
-.PHONY: build test clean examples fmt vet lint scan cli cli-arm64
+.PHONY: build test clean examples fmt vet lint scan cli cli-arm64 cover cover-html cover-check
+
+# Coverage is measured over the library only. The examples, the CLI, and the
+# fake BMS harness are demos and test infrastructure, so counting them would
+# make the number track how much example code exists rather than how well the
+# library is tested.
+COVER_EXCLUDE = -e '/examples/' -e '/cmd/' -e '/internal/fakebms/'
+COVER_PROFILE = coverage.out
+COVER_LIB_PROFILE = coverage-lib.out
+# Set below current coverage to leave headroom. Note that the total is
+# platform-dependent: internal/ble has _darwin/_linux/_other files, so a macOS
+# run and CI's Linux run cover different code and report different totals
+# (71.0% vs 70.2% at the time of writing). CI's Linux number is the one that
+# gates, so leave enough margin for the gap.
+COVER_MIN ?= 68
+
+# Extra flags for the coverage test run; CI sets this to -v.
+GOTEST_FLAGS ?=
 
 # Build all examples
 build: examples
@@ -16,9 +33,30 @@ examples:
 test:
 	go test ./...
 
+# Run tests with coverage. Tests every package so the examples and CLI still
+# get compiled, then filters the profile down to the library for reporting.
+cover:
+	go test $(GOTEST_FLAGS) -race -covermode=atomic -coverprofile=$(COVER_PROFILE) ./...
+	@grep -v $(COVER_EXCLUDE) $(COVER_PROFILE) > $(COVER_LIB_PROFILE)
+	@go tool cover -func=$(COVER_LIB_PROFILE) | tail -1
+
+# Open a browsable coverage report
+cover-html: cover
+	go tool cover -html=$(COVER_LIB_PROFILE) -o coverage.html
+	@echo "Report written to coverage.html"
+
+# Fail if library coverage drops below COVER_MIN (what CI enforces)
+cover-check: cover
+	@total=$$(go tool cover -func=$(COVER_LIB_PROFILE) | awk '/^total:/ {print $$3}' | tr -d '%'); \
+	if awk "BEGIN { exit !($$total < $(COVER_MIN)) }"; then \
+		echo "FAIL: library coverage $$total% is below the $(COVER_MIN)% minimum"; \
+		exit 1; \
+	fi; \
+	echo "OK: library coverage $$total% meets the $(COVER_MIN)% minimum"
+
 # Clean build artifacts
 clean:
-	rm -rf bin/
+	rm -rf bin/ $(COVER_PROFILE) $(COVER_LIB_PROFILE) coverage.html
 	go clean
 
 # Format code
@@ -72,6 +110,9 @@ help:
 	@echo "  cli        - Build voltgo-cli tool"
 	@echo "  cli-arm64  - Build voltgo-cli for arm64 Linux"
 	@echo "  test       - Run tests"
+	@echo "  cover      - Run tests with coverage and print the total"
+	@echo "  cover-html - Write a browsable coverage report"
+	@echo "  cover-check- Fail if coverage is below COVER_MIN (what CI enforces)"
 	@echo "  clean      - Remove build artifacts"
 	@echo "  fmt        - Format code"
 	@echo "  vet        - Run go vet"

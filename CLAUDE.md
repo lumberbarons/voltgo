@@ -25,6 +25,7 @@ Go library for monitoring Voltgo (and compatible) LiFePO4 batteries over BLE. Th
 ## Commands
 
 - Test: `make test`
+- Coverage gate (what CI enforces): `make cover-check` — library only, minimum in `COVER_MIN`
 - Format + vet + lint: `make check`
 - Lint only (what CI enforces): `make lint`
 - Build examples: `make examples`
