@@ -36,12 +36,25 @@ const (
 	// from. A bound is kept here regardless, so a battery that is genuinely
 	// unreachable still surfaces an error rather than retrying forever.
 	//
-	// Six covered every run measured against a ZT-25.6V100Ah on BlueZ 5.64,
-	// where stretches of dials that nearly all abort alternate with
-	// stretches that mostly succeed. A failing dial is cheap — it is torn
-	// down about half a second after the link comes up — so the worst case
-	// is a few seconds before the error reaches the caller.
-	connectAttempts = 6
+	// Twelve comes from 120 connects to a ZT-25.6V100Ah on BlueZ 5.64,
+	// measured with the hardware suite in hardware_test.go. Most connects
+	// need a single dial — 73 of the 120 — but the distribution has a thin,
+	// long tail: one connect needed eight dials and another nine. The bound
+	// has to clear that tail, because a connect that runs out of attempts
+	// fails the read this retry exists to save. Six, the value measured
+	// before the retries were sequenced, would have failed both.
+	//
+	// Waiting for the teardown rather than sleeping a fixed delay does not
+	// reduce how many dials a connect needs: across 60 connects each way the
+	// counts were indistinguishable (mean 1.72 against 1.63, worst eight
+	// against nine). It fixes the sequencing, not the odds, so the bound is
+	// set from the tail either way.
+	//
+	// The headroom is cheap. An aborted dial is torn down about half a
+	// second after the link comes up, and only aborts are retried at all —
+	// an unreachable battery fails on the first dial with a different error
+	// rather than working through the budget.
+	connectAttempts = 12
 
 	// teardownCeiling bounds how long a retry waits for the aborted link to
 	// be torn down before dialling regardless. The wait normally ends as
