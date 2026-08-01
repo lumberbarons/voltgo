@@ -87,6 +87,10 @@ BMS harness are excluded, so the number reflects how well the library is tested
 rather than how much example code exists. The minimum lives in `COVER_MIN` in the
 `Makefile`; raise it as coverage improves.
 
+Expect your local total to differ slightly from CI. `internal/ble` has
+`_darwin`/`_linux`/`_other` files, so a macOS run and CI's Linux run compile
+different code. CI's Linux number is the one that gates.
+
 ### Format Code
 
 ```bash
