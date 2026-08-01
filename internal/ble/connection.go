@@ -27,18 +27,28 @@ const (
 	// connectAttempts bounds how many times a link is opened before the
 	// failure reaches the caller.
 	//
-	// The abort this works around is intermittent, and how often it strikes
-	// drifts over time: measured against a ZT-25.6V100Ah on BlueZ 5.64, runs
-	// of dials that nearly all abort alternate with stretches that mostly
-	// succeed. A dial that fails is torn down about half a second after the
-	// link comes up, having exchanged no ATT traffic at all, so retrying
-	// costs little. Six attempts covered every observed run; the worst case
-	// is a few seconds spent before the error reaches the caller.
+	// The abort being retried is environmental rather than particular to
+	// this library or to this stack. BlueZ raises it when a link forms and
+	// is dropped before any ATT traffic flows, which nearby Bluetooth and
+	// Wi-Fi radios provoke; bleak retries the same error in its own BlueZ
+	// backend, unbounded, and attributes it to that interference. Two
+	// batteries advertise at roughly -55 dBm at the site these numbers come
+	// from. A bound is kept here regardless, so a battery that is genuinely
+	// unreachable still surfaces an error rather than retrying forever.
+	//
+	// Six covered every run measured against a ZT-25.6V100Ah on BlueZ 5.64,
+	// where stretches of dials that nearly all abort alternate with
+	// stretches that mostly succeed. A failing dial is cheap — it is torn
+	// down about half a second after the link comes up — so the worst case
+	// is a few seconds before the error reaches the caller.
 	connectAttempts = 6
 
-	// connectRetryDelay separates attempts, leaving the adapter time to tear
-	// the aborted link down before the next one is opened.
-	connectRetryDelay = 500 * time.Millisecond
+	// teardownCeiling bounds how long a retry waits for the aborted link to
+	// be torn down before dialling regardless. The wait normally ends as
+	// soon as BlueZ reports the disconnect, so this is a backstop for a
+	// teardown that is never announced rather than a delay paid on every
+	// retry; see waitForTeardown.
+	teardownCeiling = 2 * time.Second
 )
 
 // peerAbortReasons are the BlueZ disconnect reasons that mean a link formed
@@ -74,20 +84,27 @@ func abortedByPeer(err error) bool {
 // without an adapter or a battery.
 type dialFunc func(bluetooth.Address, bluetooth.ConnectionParams) (bluetooth.Device, error)
 
+// teardownFunc blocks until an aborted link to the address is gone, or until
+// the ceiling elapses. It matches waitForTeardown, so the platform
+// implementation satisfies it directly and tests can substitute a stub
+// without a bus or a battery.
+type teardownFunc func(ctx context.Context, address bluetooth.Address, ceiling time.Duration) error
+
 // Connection represents a BLE connection to a battery
 type Connection struct {
-	adapter    *bluetooth.Adapter
-	dial       dialFunc
-	attempts   int
-	retryDelay time.Duration
-	device     bluetooth.Device
-	service    bluetooth.DeviceService
-	writeChar  bluetooth.DeviceCharacteristic
-	notifyChar bluetooth.DeviceCharacteristic
-	connected  bool
-	mu         sync.RWMutex
-	responses  chan []byte
-	done       chan struct{}
+	adapter         *bluetooth.Adapter
+	dial            dialFunc
+	awaitTeardown   teardownFunc
+	attempts        int
+	teardownCeiling time.Duration
+	device          bluetooth.Device
+	service         bluetooth.DeviceService
+	writeChar       bluetooth.DeviceCharacteristic
+	notifyChar      bluetooth.DeviceCharacteristic
+	connected       bool
+	mu              sync.RWMutex
+	responses       chan []byte
+	done            chan struct{}
 }
 
 // NewConnection creates a new BLE connection handler
@@ -98,12 +115,13 @@ func NewConnection() (*Connection, error) {
 	}
 
 	return &Connection{
-		adapter:    adapter,
-		dial:       adapter.Connect,
-		attempts:   connectAttempts,
-		retryDelay: connectRetryDelay,
-		responses:  make(chan []byte, 10),
-		done:       make(chan struct{}),
+		adapter:         adapter,
+		dial:            adapter.Connect,
+		awaitTeardown:   waitForTeardown,
+		attempts:        connectAttempts,
+		teardownCeiling: teardownCeiling,
+		responses:       make(chan []byte, 10),
+		done:            make(chan struct{}),
 	}, nil
 }
 
@@ -153,27 +171,39 @@ func (c *Connection) Connect(ctx context.Context, address bluetooth.Address) err
 		return errors.New("already connected")
 	}
 
-	dial, attempts, delay := c.dial, c.attempts, c.retryDelay
+	dial, await := c.dial, c.awaitTeardown
+	attempts, ceiling := c.attempts, c.teardownCeiling
 	if dial == nil {
 		dial = c.adapter.Connect
+	}
+	if await == nil {
+		await = waitForTeardown
 	}
 	if attempts <= 0 {
 		attempts = connectAttempts
 	}
-	if delay <= 0 {
-		delay = connectRetryDelay
+	if ceiling <= 0 {
+		ceiling = teardownCeiling
 	}
 
-	return retryPeerAborts(ctx, attempts, delay, func() error {
+	wait := func(ctx context.Context) error {
+		return await(ctx, address, ceiling)
+	}
+
+	return retryPeerAborts(ctx, attempts, wait, func() error {
 		return c.establish(dial, address)
 	})
 }
 
 // retryPeerAborts runs establish until it succeeds, fails for a reason other
-// than a peer abort, or exhausts the attempt budget. The backoff between
-// attempts is skipped after the final one, and a cancelled context ends the
-// retries with both the abort and the cancellation preserved.
-func retryPeerAborts(ctx context.Context, attempts int, delay time.Duration, establish func() error) error {
+// than a peer abort, or exhausts the attempt budget.
+//
+// wait separates the attempts. The abort is raised on a link BlueZ has
+// already brought up, so the next dial has to follow the teardown rather than
+// race it — waiting for that teardown is what wait is for, and it is skipped
+// after the final attempt because no dial follows it. A cancelled context
+// ends the retries with both the abort and the cancellation preserved.
+func retryPeerAborts(ctx context.Context, attempts int, wait func(context.Context) error, establish func() error) error {
 	var err error
 
 	for attempt := 1; attempt <= attempts; attempt++ {
@@ -184,7 +214,7 @@ func retryPeerAborts(ctx context.Context, attempts int, delay time.Duration, est
 		if !abortedByPeer(err) || attempt == attempts {
 			return err
 		}
-		if waitErr := sleepCtx(ctx, delay); waitErr != nil {
+		if waitErr := wait(ctx); waitErr != nil {
 			return errors.Join(err, waitErr)
 		}
 	}

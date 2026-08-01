@@ -3,6 +3,7 @@ module github.com/lumberbarons/voltgo
 go 1.24
 
 require (
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.10.1
 	tinygo.org/x/bluetooth v0.15.0
@@ -11,7 +12,6 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/saltosystems/winrt-go v0.0.0-20260317170058-9c2fec580d96 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
