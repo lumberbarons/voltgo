@@ -10,9 +10,10 @@ COVER_LIB_PROFILE = coverage-lib.out
 # Set below current coverage to leave headroom. Note that the total is
 # platform-dependent: internal/ble has _darwin/_linux/_other files, so a macOS
 # run and CI's Linux run cover different code and report different totals
-# (71.0% vs 70.2% at the time of writing). CI's Linux number is the one that
-# gates, so leave enough margin for the gap.
-COVER_MIN ?= 68
+# (74.5% vs 73.5% at the time of writing). CI's Linux number is the one that
+# gates and the lower of the two, so set this from a Linux run and leave enough
+# margin for the gap.
+COVER_MIN ?= 71
 
 # Extra flags for the coverage test run; CI sets this to -v.
 GOTEST_FLAGS ?=
