@@ -70,6 +70,27 @@ make examples
 make test
 ```
 
+### Check Coverage
+
+CI fails the build if library coverage drops below a minimum. Check it locally
+the same way CI does:
+
+```bash
+make cover-check
+```
+
+`make cover` prints the total without enforcing the minimum, and `make cover-html`
+writes a browsable `coverage.html` showing which lines are uncovered.
+
+Coverage is measured over the library only — the examples, the CLI, and the fake
+BMS harness are excluded, so the number reflects how well the library is tested
+rather than how much example code exists. The minimum lives in `COVER_MIN` in the
+`Makefile`; raise it as coverage improves.
+
+Expect your local total to differ slightly from CI. `internal/ble` has
+`_darwin`/`_linux`/`_other` files, so a macOS run and CI's Linux run compile
+different code. CI's Linux number is the one that gates.
+
 ### Format Code
 
 ```bash

@@ -3,3 +3,6 @@ voltgo.apk
 voltgo/
 bin/
 scratch/
+coverage.out
+coverage-lib.out
+coverage.html

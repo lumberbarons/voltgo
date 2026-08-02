@@ -18,8 +18,39 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run tests
-        run: go test -v -race ./...
+      - name: Run tests and check coverage
+        run: make cover-check GOTEST_FLAGS=-v
+
+      - name: Summarise coverage
+        if: always()
+        run: |
+          # Tests may have failed before a profile was written.
+          [ -f coverage-lib.out ] || exit 0
+          {
+            echo "## Coverage"
+            echo
+            echo '```'
+            go tool cover -func=coverage-lib.out | tail -1
+            echo '```'
+            echo
+            echo "<details><summary>Per-function breakdown</summary>"
+            echo
+            echo '```'
+            go tool cover -func=coverage-lib.out
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage profile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          if-no-files-found: ignore
+          path: |
+            coverage.out
+            coverage-lib.out
 
   lint:
     name: Lint
