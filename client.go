@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"tinygo.org/x/bluetooth"
+
 	"github.com/lumberbarons/voltgo/battery"
 	"github.com/lumberbarons/voltgo/internal/ble"
 	"github.com/lumberbarons/voltgo/internal/protocol"
@@ -15,9 +17,21 @@ const (
 	DefaultScanDuration = 10 * time.Second
 )
 
+// bleLink is everything Client needs from a BLE connection: the scan and
+// connect entry points, plus the Transport it hands to a Battery once
+// connected. *ble.Connection implements it; tests substitute their own so
+// Scan, Connect and Close can be exercised without an adapter.
+type bleLink interface {
+	Transport
+	Scan(ctx context.Context, duration time.Duration) ([]bluetooth.ScanResult, error)
+	Connect(ctx context.Context, address bluetooth.Address) error
+}
+
+var _ bleLink = (*ble.Connection)(nil)
+
 // Client is the main client for communicating with Voltgo batteries
 type Client struct {
-	conn *ble.Connection
+	conn bleLink
 }
 
 // NewClient creates a new Voltgo client
