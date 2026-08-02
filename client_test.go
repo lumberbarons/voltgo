@@ -2,13 +2,15 @@ package voltgo
 
 import (
 	"context"
+	"errors"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tinygo.org/x/bluetooth"
 
-	"github.com/lumberbarons/voltgo/battery"
 	"github.com/lumberbarons/voltgo/internal/ble"
 	"github.com/lumberbarons/voltgo/internal/fakebms"
 	"github.com/lumberbarons/voltgo/internal/protocol"
@@ -164,13 +166,202 @@ func TestAverageTemp(t *testing.T) {
 	assert.Equal(t, -5.0, averageTemp([]int{-10, 0}))
 }
 
+// fakeLink stands in for *ble.Connection. It embeds the BMS emulator so a
+// Battery handed out by Connect talks to a real Modbus responder, and records
+// the scan and connect traffic Client drives through it.
+type fakeLink struct {
+	*fakebms.Device
+
+	scanResults   []bluetooth.ScanResult
+	scanErr       error
+	scanned       []time.Duration
+	connectErr    error
+	connectedTo   []bluetooth.Address
+	disconnects   int
+	disconnectErr error
+}
+
+func newFakeLink() *fakeLink {
+	return &fakeLink{Device: fakebms.New()}
+}
+
+func (f *fakeLink) Scan(_ context.Context, duration time.Duration) ([]bluetooth.ScanResult, error) {
+	f.scanned = append(f.scanned, duration)
+	if f.scanErr != nil {
+		return nil, f.scanErr
+	}
+	return f.scanResults, nil
+}
+
+func (f *fakeLink) Connect(_ context.Context, address bluetooth.Address) error {
+	f.connectedTo = append(f.connectedTo, address)
+	return f.connectErr
+}
+
+func (f *fakeLink) Disconnect() error {
+	f.disconnects++
+	if f.disconnectErr != nil {
+		return f.disconnectErr
+	}
+	return f.Device.Disconnect()
+}
+
+// advertisement is the slice of bluetooth.AdvertisementPayload that Client
+// reads: everything else is present only to satisfy the interface.
+type advertisement struct {
+	name string
+}
+
+func (a advertisement) LocalName() string                                     { return a.name }
+func (a advertisement) HasServiceUUID(bluetooth.UUID) bool                    { return false }
+func (a advertisement) ServiceUUIDs() []bluetooth.UUID                        { return nil }
+func (a advertisement) Bytes() []byte                                         { return nil }
+func (a advertisement) ManufacturerData() []bluetooth.ManufacturerDataElement { return nil }
+func (a advertisement) ServiceData() []bluetooth.ServiceDataElement           { return nil }
+
+// scanResult builds an advertisement for an address in whichever form this
+// platform's ParseAddress accepts.
+func scanResult(t *testing.T, address, name string, rssi int16) bluetooth.ScanResult {
+	t.Helper()
+	addr, err := ble.ParseAddress(address)
+	require.NoError(t, err)
+	return bluetooth.ScanResult{
+		Address:              addr,
+		RSSI:                 rssi,
+		AdvertisementPayload: advertisement{name: name},
+	}
+}
+
+// addressPair returns two addresses that parse on this platform: a MAC on
+// Linux, a CoreBluetooth UUID on macOS.
+func addressPair(t *testing.T) (string, string) {
+	t.Helper()
+	pairs := [][2]string{
+		{"A4:C1:37:43:A4:42", "A4:C1:37:43:A4:33"},
+		{"00000000-0000-1000-8000-00805f9b34f1", "00000000-0000-1000-8000-00805f9b34f2"},
+	}
+	for _, pair := range pairs {
+		if _, err := ble.ParseAddress(pair[0]); err == nil {
+			return pair[0], pair[1]
+		}
+	}
+	t.Fatalf("no address form parses on %s", runtime.GOOS)
+	return "", ""
+}
+
+func TestScan_DedupesAndMapsDevices(t *testing.T) {
+	first, second := addressPair(t)
+	link := newFakeLink()
+	link.scanResults = []bluetooth.ScanResult{
+		scanResult(t, first, "ZT-25.6V100Ah-1238", -73),
+		scanResult(t, second, "ZT-25.6V100Ah-1221", -77),
+		scanResult(t, first, "", -70), // nameless scan response, fresher RSSI
+	}
+	c := &Client{conn: link}
+
+	devices, err := c.Scan(context.Background(), 3*time.Second)
+
+	require.NoError(t, err)
+	require.Len(t, devices, 2)
+	// First-seen order preserved, freshest RSSI kept, name not erased.
+	assert.Equal(t, "ZT-25.6V100Ah-1238", devices[0].Name)
+	assert.Equal(t, int16(-70), devices[0].RSSI)
+	assert.Equal(t, "ZT-25.6V100Ah-1221", devices[1].Name)
+	assert.Equal(t, int16(-77), devices[1].RSSI)
+	// Addresses come back in the string form Connect accepts.
+	for _, device := range devices {
+		_, err := ble.ParseAddress(device.Address)
+		assert.NoError(t, err, "address %q should round-trip through ParseAddress", device.Address)
+	}
+	assert.Equal(t, []time.Duration{3 * time.Second}, link.scanned)
+}
+
+func TestScan_NoDevices(t *testing.T) {
+	link := newFakeLink()
+	c := &Client{conn: link}
+
+	devices, err := c.Scan(context.Background(), time.Second)
+
+	require.NoError(t, err)
+	assert.Empty(t, devices)
+}
+
+func TestScan_PropagatesError(t *testing.T) {
+	link := newFakeLink()
+	link.scanErr = errors.New("adapter busy")
+	c := &Client{conn: link}
+
+	devices, err := c.Scan(context.Background(), time.Second)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "adapter busy")
+	assert.Nil(t, devices)
+}
+
 func TestConnect_InvalidAddress(t *testing.T) {
 	// Address parsing fails before any BLE work happens.
-	c := &Client{}
+	link := newFakeLink()
+	c := &Client{conn: link}
 
-	_, err := c.Connect(context.Background(), "not-an-address")
+	b, err := c.Connect(context.Background(), "not-an-address")
+
 	require.Error(t, err)
+	assert.Nil(t, b)
 	assert.Contains(t, err.Error(), "not-an-address")
+	assert.Empty(t, link.connectedTo, "no connect should be attempted for an unparseable address")
+}
+
+func TestConnect_ReturnsBatteryOnTheLink(t *testing.T) {
+	address, _ := addressPair(t)
+	link := newFakeLink()
+	c := &Client{conn: link}
+
+	b, err := c.Connect(context.Background(), address)
+
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	// The Battery is wired to the same link, so it can read from it.
+	status, err := b.GetStatus(context.Background())
+	require.NoError(t, err)
+	assert.Positive(t, status.Voltage)
+
+	parsed, err := ble.ParseAddress(address)
+	require.NoError(t, err)
+	assert.Equal(t, []bluetooth.Address{parsed}, link.connectedTo)
+}
+
+func TestConnect_PropagatesLinkError(t *testing.T) {
+	address, _ := addressPair(t)
+	link := newFakeLink()
+	link.connectErr = errors.New("le-connection-abort-by-local")
+	c := &Client{conn: link}
+
+	b, err := c.Connect(context.Background(), address)
+
+	require.Error(t, err)
+	assert.Nil(t, b)
+	assert.Contains(t, err.Error(), "le-connection-abort-by-local")
+}
+
+func TestClose_DisconnectsLink(t *testing.T) {
+	link := newFakeLink()
+	c := &Client{conn: link}
+
+	require.NoError(t, c.Close())
+
+	assert.Equal(t, 1, link.disconnects)
+	assert.False(t, link.IsConnected())
+}
+
+func TestClose_PropagatesDisconnectError(t *testing.T) {
+	link := newFakeLink()
+	link.disconnectErr = errors.New("adapter gone")
+	c := &Client{conn: link}
+
+	err := c.Close()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "adapter gone")
 }
 
 func TestReadRegisters_ErrorMentionsRegisterRange(t *testing.T) {
@@ -180,26 +371,4 @@ func TestReadRegisters_ErrorMentionsRegisterRange(t *testing.T) {
 	_, err := b.ReadRegisters(context.Background(), 105, 32)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "105-136")
-}
-
-func TestDedupeDevices(t *testing.T) {
-	in := []battery.DeviceInfo{
-		{Name: "ZT-25.6V100Ah-1238", Address: "A4:C1:37:43:A4:42", RSSI: -73},
-		{Name: "ZT-25.6V100Ah-1221", Address: "A4:C1:37:43:A4:33", RSSI: -77},
-		{Name: "", Address: "A4:C1:37:43:A4:42", RSSI: -70}, // nameless scan response, fresher RSSI
-		{Name: "ZT-25.6V100Ah-1221", Address: "A4:C1:37:43:A4:33", RSSI: -75},
-	}
-
-	out := dedupeDevices(in)
-
-	require.Len(t, out, 2)
-	// First-seen order preserved, freshest RSSI kept, name not erased.
-	assert.Equal(t, "ZT-25.6V100Ah-1238", out[0].Name)
-	assert.Equal(t, int16(-70), out[0].RSSI)
-	assert.Equal(t, "ZT-25.6V100Ah-1221", out[1].Name)
-	assert.Equal(t, int16(-75), out[1].RSSI)
-}
-
-func TestDedupeDevices_Empty(t *testing.T) {
-	assert.Empty(t, dedupeDevices(nil))
 }
